@@ -1,11 +1,21 @@
 // =====================================================================
-//  OFFSETS UPDATE STATUS (dump_1.cs + script.json)
-//  [UPD]      = updated & verified against the new dump/script.json.
-//  [TODO obf] = NOT updated. The game-logic method/type is obfuscated in
-//               the new build (random il2cpp names), so it cannot be
-//               remapped by name from the dump alone. Old value kept as-is.
-//               These need manual RE (string-literal / xref / signature
-//               anchoring) or an old->new address diff to resolve safely.
+//  OFFSETS UPDATE STATUS  (target: libil2cpp.so, arm64-v8a / Standoff 0.39.1)
+//  Sources: dump_1.cs + script.json (new 0.39.1), il2cpp export list (.txt),
+//           0.31.0 32/64-bit dumps (reference).
+//
+//  [UPD]      = updated & verified against the new dump / metadata.
+//  [TODO obf] = NOT updated. Standoff game-logic methods/fields are
+//               obfuscated with names that are RANDOMIZED every build
+//               (e.g. AGHCGACFDFEECHD()), so they cannot be matched by
+//               name across versions. The provided 0.31.0 dumps do NOT
+//               match this offsets table either (offsets.h was built for a
+//               build newer than 0.31.0 -- e.g. Input::GetTouch is 0x49FBCB0
+//               here vs 0x4811B00 in 0.31.0), so an address diff is also not
+//               possible. Old values kept as-is; these need the exact dump
+//               of the source build, or per-method manual RE.
+//  Note: *_TypeInfo entries set to small integers (1,2,3,...) are runtime
+//        indices resolved via il2cpp_class_from_name -- do NOT turn them
+//        into addresses.
 // =====================================================================
 namespace offsets {
     constexpr ::std::ptrdiff_t String$$CreateString = 0x5C057D0;  // [UPD] Unity: System.String::CreateString(char*,int,int) [overload assumed]
@@ -75,7 +85,7 @@ namespace offsets {
 
     constexpr ::std::ptrdiff_t OCCLUSIONCONTROL$$SETIGNORERAYCASTING = 0x26A1BD0;
     constexpr ::std::ptrdiff_t func_objectocclude_bool = 0x510A890;  // [TODO obf] custom RVA (USED in occlusion.h)
-    constexpr ::std::ptrdiff_t WeaponDropManager_TypeInfo = 0x514AEC8;
+    constexpr ::std::ptrdiff_t WeaponDropManager_TypeInfo = 0xAA1BA28;  // [UPD] TypeInfo Axlebolt.Standoff.Inventory.Drop.WeaponDropManager (from metadata)
 
     constexpr ::std::ptrdiff_t GetOcclusionControl = 0x513CA08;
 

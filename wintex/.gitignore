@@ -1,0 +1,14 @@
+# Build artifacts (Android NDK / Gradle)
+obj/
+build/
+**/*.o
+**/*.o.d
+**/*.o.tmp
+**/*.so
+**/*.dex
+**/*.class
+**/*.ap_
+
+# Backups / temp
+**/*.bak
+**/*.tmp

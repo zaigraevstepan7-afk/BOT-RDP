@@ -286,7 +286,7 @@ void player() {
       
       uint64_t PhotonView = rpm<uintptr_t>(localPlayer + oxorany(0x150));
       
-      uint64_t gameController = getInstance(proc.base + oxorany(0xAA12E60), false, oxorany(0x8));
+      uint64_t gameController = getInstance(proc.base + oxorany(0xAC58BB0), false, oxorany(0x8));
       
       uint64_t PlayerControls = rpm<uint64_t>(gameController + oxorany(0x2A0));
 		
@@ -295,7 +295,7 @@ void player() {
       uint64_t settingsTR = rpm<uintptr_t>(settings + oxorany(0x40));
       uint64_t settingsG = rpm<uintptr_t>(gameController + oxorany(0xC0));
       
-      auto PhotonNetwork = getInstance(proc.base + oxorany(0xAA17EA0), false, oxorany(0x18));
+      auto PhotonNetwork = getInstance(proc.base + oxorany(0xAC5DE18), false, oxorany(0x18));
       auto room = rpm<uintptr_t>(PhotonNetwork + oxorany(0x170));
       
       if (airstafe) {
@@ -752,7 +752,7 @@ if (strafe) {
 
 uintptr_t Room()
 {
-      auto PhotonNetwork = getInstance(proc.base + oxorany(0xAA17EA0), false, oxorany(0x18));
+      auto PhotonNetwork = getInstance(proc.base + oxorany(0xAC5DE18), false, oxorany(0x18));
       auto room = rpm<uintptr_t>(PhotonNetwork + oxorany(0x170)); //160
       return room;
 }

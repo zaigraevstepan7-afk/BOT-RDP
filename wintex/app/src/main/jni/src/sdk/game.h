@@ -25,13 +25,13 @@ using namespace ImGui;
 
 // Canonical PlayerManager static-field resolver for Standoff 2 (Unity6 build).
 // IL2CPP layout: (proc.base + typeOffset) -> +0x60 (static_fields) -> +0x10 (instance).
-// candidate #1 = PlayerManager_TypeInfo (0xAA181F8 / 178356728) from the current dump;
+// candidate #1 = PlayerManager_TypeInfo (0xAC5E190 / 180740496) from the current dump;
 // candidate #2 is the previous-build fallback and is only used if #1 fails to resolve.
 static inline bool wtx_likely_ptr(uint64_t p) {
     return p > 0x10000ull && p < 0x0000FFFFFFFFFFFFull;
 }
 static inline uint64_t resolvePlayerManager() {
-    const uint64_t candidates[] = { 178356728ull, 132435632ull };
+    const uint64_t candidates[] = { 180740496ull, 132435632ull };
     for (uint64_t off : candidates) {
         uint64_t cls = rpm<uint64_t>(proc.base + off);
         if (!cls) continue;
@@ -2694,7 +2694,7 @@ public:
             float now = ImGui::GetTime();
             if (now - lastDbg >= 1.0f) {
                 lastDbg = now;
-                uintptr_t cls = rpm<uintptr_t>(proc.base + 0xAA12E60);
+                uintptr_t cls = rpm<uintptr_t>(proc.base + 0xAC58BB0);
                 uintptr_t sf  = cls ? rpm<uintptr_t>(cls + 0x60) : 0;
                 FILE* f = fopen("/data/local/tmp/hvh.txt", "w");
                 if (f) {
@@ -2730,7 +2730,7 @@ private:
     // Drive the real fire input the game reads (PlayerInputs.IsToFire), so the
     // shot goes through the game's own pipeline (ammo/recoil/visibility checks).
     void setFireInput(bool v) {
-        uintptr_t cls = rpm<uintptr_t>(proc.base + 0xAA12E60);
+        uintptr_t cls = rpm<uintptr_t>(proc.base + 0xAC58BB0);
         if (!cls) return;
         uintptr_t sf = rpm<uintptr_t>(cls + 0x60);     // static_fields
         if (!sf) return;

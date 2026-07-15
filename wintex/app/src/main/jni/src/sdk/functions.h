@@ -162,7 +162,7 @@ namespace tpbody {
     static const uintptr_t RVA_SETCHARVIS = 0x7697854; // PlayerController.SetCharacterVisible(bool)
     static const uintptr_t RVA_SETTPSVIEW = 0x7697560; // PlayerController.SetTPSView()
     static const uintptr_t RVA_CALLEE     = RVA_SETTPSVIEW; // function the cave calls on the local player
-    static const uint64_t  OFF_PM_STATIC  = 180740496; // PlayerManager il2cpp static slot
+    static const uint64_t  OFF_PM_STATIC  = 153868920; // PlayerManager il2cpp static slot
     static const uint32_t  ORIG_LU_INSN   = 0xA9BE57FE; // stp x30,x21,[sp,#-0x20]!
 
     static inline uint32_t bImm(uintptr_t target, uintptr_t pc) {
@@ -528,7 +528,7 @@ void offer()
 		wpm<float>(localGame + oxorany(0x98), 0.0f);
 	}
 	
-	uintptr_t bombManager = rpm<uintptr_t>(rpm<uintptr_t>(rpm<uintptr_t>(rpm<uintptr_t>(proc.base + oxorany(0xAC4FAC0)) + 0x190) + 0x198) + 0x0);
+	uintptr_t bombManager = rpm<uintptr_t>(rpm<uintptr_t>(rpm<uintptr_t>(rpm<uintptr_t>(proc.base + oxorany(0x9114DC0)) + 0x190) + 0x198) + 0x0);
 	
     if (!bombManager) {
 	}

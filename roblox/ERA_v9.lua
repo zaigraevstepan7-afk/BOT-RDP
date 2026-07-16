@@ -34,7 +34,7 @@ local Config = {
     -- Aimbot
     AimOn = false, AimMethod = "Camera", AimMode = "Toggle",
     AimKey = Enum.UserInputType.MouseButton2,
-    FOV = 250, Smoothness = 0.5, Prediction = 0.0, TargetPart = "Head",
+    FOV = 300, Smoothness = 0.6, Prediction = 0.0, TargetPart = "Head",
     AimTarget = "Closest",   -- "Closest" (snap to nearest enemy) | "Crosshair" (nearest to aim, within FOV)
     TeamCheck = false, VisibleCheck = false, Wallshot = false, StickyTarget = true,
     ShowFOV = true, FOVRainbow = false, AimDebug = true,
@@ -528,31 +528,40 @@ local aiming, aimToggleState, aimMobile, lockedTarget = false, false, false, nil
 local aimDbg   -- on-screen debug label (created in the UI section); shows player/target state
 local function partOf(p)
     local c = p.Character; if not c then return end
-    -- try the chosen part + the usual names first
-    local named = c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("Head")
-        or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("UpperTorso") or c:FindFirstChild("Torso")
-    if named and named:IsA("BasePart") then return named end
-    -- custom rig fallback: Humanoid's root, the model's PrimaryPart, or ANY part in the model
+    -- named head/target part first
+    local head = c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("Head")
+    if head and head:IsA("BasePart") then return head end
+    -- custom rig: the TOPMOST part is almost always the head → clean aim point
+    local top, topY
+    for _, v in ipairs(c:GetDescendants()) do
+        if v:IsA("BasePart") and (not topY or v.Position.Y > topY) then top, topY = v, v.Position.Y end
+    end
+    if top then return top end
     local hum = c:FindFirstChildWhichIsA("Humanoid")
-    if hum and hum.RootPart then return hum.RootPart end
-    if c.PrimaryPart then return c.PrimaryPart end
-    return c:FindFirstChildWhichIsA("BasePart", true)
+    return (hum and hum.RootPart) or c.PrimaryPart
 end
 local function isAlive(p)
+    -- Targetable if the character is present with a body part. We intentionally do NOT
+    -- gate on Humanoid.Health: many games use custom health and keep Humanoid.Health at 0,
+    -- which was making the aimbot skip perfectly valid targets. Dead players are removed/
+    -- respawned so they won't have parts anyway.
     local c = p.Character
-    if not c then return false end
+    if not c or not c.Parent then return false end
     local h = c:FindFirstChildWhichIsA("Humanoid")
-    if h then return h.Health > 0 end
-    -- some games use custom characters without a standard Humanoid: accept if a body part exists
-    return c:FindFirstChild("HumanoidRootPart") ~= nil or c:FindFirstChild("Head") ~= nil
+    if h and h.Health <= 0 and h.MaxHealth > 0 then return false end   -- only skip if it's a real, dead Humanoid
+    return c:FindFirstChildWhichIsA("BasePart", true) ~= nil
 end
 local function visibleTo(part)
     if Config.Wallshot or not Config.VisibleCheck then return true end
     local rp = RaycastParams.new(); rp.FilterType = Enum.RaycastFilterType.Exclude
     rp.FilterDescendantsInstances = { LocalPlayer.Character }
     local from = cam().CFrame.Position
-    local hit = Workspace:Raycast(from, part.Position - from, rp)
-    return (not hit) or (part.Parent and hit.Instance:IsDescendantOf(part.Parent))
+    local dir = part.Position - from
+    local hit = Workspace:Raycast(from, dir, rp)
+    if not hit then return true end
+    if part.Parent and hit.Instance:IsDescendantOf(part.Parent) then return true end
+    -- near-miss forgiveness: blocky rigs raycast slightly in front of the aim part
+    return hit.Distance >= dir.Magnitude - 6
 end
 local function aimAt(part)
     if Config.Prediction > 0 then return part.Position + part.AssemblyLinearVelocity * Config.Prediction end
@@ -560,32 +569,34 @@ local function aimAt(part)
 end
 local function pickTarget()
     local C = cam(); local center = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
-    local closest = Config.AimTarget == "Closest"   -- snap to nearest enemy (like the WRD aimbot); else crosshair+FOV
-    -- sticky only makes sense in crosshair mode
-    if not closest and Config.StickyTarget and lockedTarget and lockedTarget.Parent and isAlive(lockedTarget) and enemyCheck(lockedTarget) then
+    local closest = Config.AimTarget == "Closest"
+    -- sticky: keep the current target if it's still valid & on screen (reduces flicker)
+    if Config.StickyTarget and lockedTarget and lockedTarget.Parent and enemyCheck(lockedTarget) and isAlive(lockedTarget) then
         local part = partOf(lockedTarget)
         if part then
             local sp, on = C:WorldToViewportPoint(part.Position)
-            if on and (Vector2.new(sp.X, sp.Y) - center).Magnitude <= Config.FOV and visibleTo(part) then return part end
+            if on and visibleTo(part) and (Vector2.new(sp.X, sp.Y) - center).Magnitude <= Config.FOV then
+                return part
+            end
         end
         lockedTarget = nil
     end
-    local best, bestPart, bestScore = nil, nil, (closest and math.huge or Config.FOV)
+    local best, bestPart, bestScore = nil, nil, math.huge
     for _, p in ipairs(others()) do
         if enemyCheck(p) and isAlive(p) then
             local part = partOf(p)
             if part and visibleTo(part) then
-                if closest then
-                    -- nearest by 3D distance, regardless of where it is on screen (camera snaps to it)
-                    local d = (C.CFrame.Position - part.Position).Magnitude
-                    if d < bestScore then best, bestPart, bestScore = p, part, d end
-                else
-                    local sp, on = C:WorldToViewportPoint(part.Position)
-                    if on then
-                        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                        if d < bestScore then best, bestPart, bestScore = p, part, d end
+                local sp, on = C:WorldToViewportPoint(part.Position)
+                local score
+                if on then
+                    local sd = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                    if sd <= Config.FOV then
+                        -- must be on screen AND inside the FOV circle (the enemy you're aiming near).
+                        -- Closest = nearest of those by 3D distance; Crosshair = nearest to the crosshair.
+                        score = closest and (C.CFrame.Position - part.Position).Magnitude or sd
                     end
                 end
+                if score and score < bestScore then best, bestPart, bestScore = p, part, score end
             end
         end
     end
@@ -638,16 +649,17 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
             elseif typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then aiming = UIS:IsKeyDown(k)
             else aiming = false end
         end
-        if aimMobile then aiming = true end
     else aiming = false end
+    if aimMobile then aiming = true end   -- mobile AIM button works regardless of the desktop master toggle
     local engage = aiming or Config.AutoFire   -- Auto Fire aims + shoots by itself (rage)
     if not engage then lockedTarget = nil; return end
     local part = pickTarget(); if not part then return end
     local goal = aimAt(part)
-    if Config.AimMethod == "Camera" then
-        C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), math.clamp(Config.Smoothness, 0.02, 1))
+    if Config.AimMethod == "Camera" or not mousemoverel then   -- Silent falls back to Camera if the executor lacks mousemoverel
+        local a = 1 - (1 - math.clamp(Config.Smoothness, 0.05, 1)) ^ (dt * 60)   -- frame-rate independent lerp
+        C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), a)
         pcall(function() C.Focus = CFrame.new(goal) end)   -- some first-person games follow Camera.Focus
-    elseif mousemoverel then
+    else
         local sp, on = C:WorldToViewportPoint(goal)
         if on then mousemoverel((sp.X - C.ViewportSize.X / 2) * Config.Smoothness, (sp.Y - C.ViewportSize.Y / 2) * Config.Smoothness) end
     end
@@ -1215,6 +1227,14 @@ end)
 -- auto-load config on start (before responsive scale)
 local loadedConfig = false
 pcall(function() if fileReady() and isfile(cfgPath("default")) then loadedConfig = deserializeInto(readfile(cfgPath("default"))); syncWidgets() end end)
+
+-- Enforce reliable HvH capture settings so a stale saved config can't break target capture.
+loading = true
+for k, v in pairs({ TeamCheck = false, VisibleCheck = false, AimTarget = "Closest" }) do
+    Config[k] = v
+    if widgets[k] then pcall(function() widgets[k].set(v) end) end
+end
+loading = false
 
 -- responsive first scale (only when no saved config, so a saved UI Scale persists)
 if not loadedConfig then

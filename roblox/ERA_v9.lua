@@ -578,7 +578,8 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
         fovCircle.Position = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
     end
     if not Config.AimOn then aiming = false; return end
-    if Config.AimMode == "Toggle" then aiming = aimToggleState
+    if Config.AimMode == "Always" then aiming = true
+    elseif Config.AimMode == "Toggle" then aiming = aimToggleState
     else
         local k = Config.AimKey
         if typeof(k) == "EnumItem" and k.EnumType == Enum.UserInputType then aiming = UIS:IsMouseButtonPressed(k)
@@ -810,7 +811,7 @@ local setT   = addTab("Settings","⚙")
 section(combat, "Aimbot")
 Toggle(combat, "AimBot", "AimOn", function(on) if not on then aimToggleState = false end; Notify(on and "Aimbot ON" or "Aimbot OFF", 1.3, on and Theme.Good or Theme.Bad) end)
 Dropdown(combat, "Method", "AimMethod", { "Camera", "Silent" }, function(v) if v == "Silent" and not mousemoverel then Notify("Silent needs mousemoverel", 3, Theme.Bad) end end)
-Dropdown(combat, "Mode", "AimMode", { "Hold", "Toggle" }, function() aimToggleState = false end)
+Dropdown(combat, "Mode", "AimMode", { "Hold", "Toggle", "Always" }, function() aimToggleState = false end)
 Keybind(combat, "Aim Key", "AimKey")
 Slider(combat, "FOV", "FOV", 40, 500, 0)
 Slider(combat, "Smoothness", "Smoothness", 0.02, 1, 2)
@@ -1030,8 +1031,8 @@ do
     end)
 end
 UIS.InputBegan:Connect(function(i, gp)
-    if gp then return end
-    if i.KeyCode == Config.MenuKey then setMenu(not menuOpen) end
+    -- Aim toggle must fire even when the game consumes the button (e.g. RMB = aim-down-sights,
+    -- which makes gameProcessed=true). So handle it BEFORE the gp early-return.
     if Config.AimOn and Config.AimMode == "Toggle" then
         local k = (i.KeyCode ~= Enum.KeyCode.Unknown and i.KeyCode) or i.UserInputType
         if k == Config.AimKey then
@@ -1039,6 +1040,8 @@ UIS.InputBegan:Connect(function(i, gp)
             Notify(aimToggleState and "Aim ON" or "Aim OFF", 1, aimToggleState and Theme.Good or Theme.Bad)
         end
     end
+    if gp then return end
+    if i.KeyCode == Config.MenuKey then setMenu(not menuOpen) end
 end)
 
 -- ============================ UNLOAD ==========================

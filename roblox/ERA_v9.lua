@@ -32,10 +32,10 @@ local function cam() return Workspace.CurrentCamera end
 -- ============================ CONFIG (persisted) ===============
 local Config = {
     -- Aimbot
-    AimOn = false, AimMethod = "Camera", AimMode = "Hold",
+    AimOn = false, AimMethod = "Camera", AimMode = "Toggle",
     AimKey = Enum.UserInputType.MouseButton2,
-    FOV = 140, Smoothness = 0.22, Prediction = 0.0, TargetPart = "Head",
-    TeamCheck = true, VisibleCheck = true, Wallshot = false, StickyTarget = true,
+    FOV = 140, Smoothness = 0.35, Prediction = 0.0, TargetPart = "Head",
+    TeamCheck = true, VisibleCheck = false, Wallshot = false, StickyTarget = true,
     ShowFOV = true, FOVRainbow = false,
     -- Hitbox
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
@@ -656,25 +656,25 @@ local function ensureMoveConn()
 end
 
 -- ---- Hitbox Expander ----
-local hitboxOrig, hitboxConn = {}, nil
+-- Hitbox expander (client-side aim assist). Size-only, so it stays a LOCAL,
+-- non-replicated change to another player's part: nothing visible (no Transparency),
+-- no physics change (no CanCollide/Massless) => far less for an anti-cheat to flag.
+local hitboxOrig, hitboxConn = {}, nil   -- part -> original Size
 local function restoreHitboxes()
-    for part, o in pairs(hitboxOrig) do
-        if part and part.Parent then part.Size = o.Size; part.Transparency = o.Transparency
-            part.CanCollide = o.CanCollide; part.Massless = o.Massless end
-    end
+    for part, sz in pairs(hitboxOrig) do if part and part.Parent then pcall(function() part.Size = sz end) end end
     hitboxOrig = {}
 end
 local function setHitbox(on)
     Config.HitboxOn = on
     if on and not hitboxConn then
         hitboxConn = RunService.Heartbeat:Connect(function()
+            local want = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
             for _, p in ipairs(others()) do
                 if enemyCheck(p) and p.Character then
                     local part = p.Character:FindFirstChild(Config.HitboxPart)
                     if part and part:IsA("BasePart") then
-                        if hitboxOrig[part] == nil then hitboxOrig[part] = { Size = part.Size, Transparency = part.Transparency, CanCollide = part.CanCollide, Massless = part.Massless } end
-                        local s = Config.HitboxSize
-                        part.Size = Vector3.new(s, s, s); part.Transparency = 0.72; part.CanCollide = false; part.Massless = true
+                        if hitboxOrig[part] == nil then hitboxOrig[part] = part.Size end
+                        if part.Size ~= want then pcall(function() part.Size = want end) end  -- only write on change
                     end
                 end
             end
@@ -974,7 +974,18 @@ aimBtn = mobButton("AIM", UDim2.new(1, -66, 1, -66), Config.Accent)
 ncBtn  = mobButton("NOCLIP", UDim2.new(1, -136, 1, -66), Theme.Bg2)
 aimBtn.Visible = Config.ShowAimBtn
 ncBtn.Visible  = Config.ShowNoClipBtn
-bindMobile(aimBtn, { base = Config.Accent, onHold = function() aimMobile = true end, onRelease = function() aimMobile = false end })
+bindMobile(aimBtn, { base = Config.Accent,
+    -- Hold mode: aim while pressed. Toggle mode: tap to switch aiming on/off.
+    onHold    = function() if Config.AimMode == "Hold" then aimMobile = true end end,
+    onRelease = function() if Config.AimMode == "Hold" then aimMobile = false end end,
+    onTap     = function()
+        if Config.AimMode == "Toggle" then
+            if not Config.AimOn and widgets.AimOn then widgets.AimOn.set(true) end  -- auto-enable master
+            aimToggleState = not aimToggleState
+            aimBtn.BackgroundTransparency = aimToggleState and 0 or 0.12
+            Notify(aimToggleState and "Aim ON" or "Aim OFF", 1, aimToggleState and Theme.Good or Theme.Bad)
+        end
+    end })
 bindMobile(ncBtn,  { base = Theme.Bg2, onTap = function() local w = widgets.NoClipOn; if w then w.set(not Config.NoClipOn) end end })
 
 -- ============================ OPEN / CLOSE =====================
@@ -1023,7 +1034,10 @@ UIS.InputBegan:Connect(function(i, gp)
     if i.KeyCode == Config.MenuKey then setMenu(not menuOpen) end
     if Config.AimOn and Config.AimMode == "Toggle" then
         local k = (i.KeyCode ~= Enum.KeyCode.Unknown and i.KeyCode) or i.UserInputType
-        if k == Config.AimKey then aimToggleState = not aimToggleState end
+        if k == Config.AimKey then
+            aimToggleState = not aimToggleState
+            Notify(aimToggleState and "Aim ON" or "Aim OFF", 1, aimToggleState and Theme.Good or Theme.Bad)
+        end
     end
 end)
 

@@ -1,16 +1,18 @@
---[[  ERA Roblox Script v9.0  ==================================================
-      "Claude" edition 🦀  — glass/blur menu, sounds, animations, config system.
+--[[  ERA Roblox Script v9  ===================================================
+      Minimal edition — clean flat menu, config system, and HvH tooling.
 
   Features
     Combat   : Aimbot (Camera/Silent, Hold/Toggle, FOV, smooth, prediction,
                team/visible/wall checks, sticky), Hitbox Expander.
+    Rage/HvH : Auto Fire, Trigger Bot (fires on-crosshair, wall check),
+               Anti-Aim (yaw spin/flip + custom pitch lean), Third Person.
     Weapon   : Infinite Ammo, Fast Fire        (best-effort, game-dependent).
     Visuals  : ESP  (Highlight chams through walls, team colour).
     Movement : NoClip Fly (fly with the normal joystick/WASD, follows the camera,
                passes through walls), WalkSpeed, JumpPower.
     Utility  : Anti-Kick (best-effort, needs an executor with hookmetamethod).
-    UI       : tabbed glass menu, background blur, animated gradients, sounds,
-               config save/load, mobile buttons (hold 3s to move them).
+    UI       : flat minimal tabbed menu, background blur, sounds, config
+               save/load, mobile buttons (hold 3s to move them).
 
   Reliability: Aimbot/NoClip-Fly/Hitbox/ESP/WalkSpeed/Jump = reliable client-side.
                Infinite Ammo/Fast Fire/Anti-Kick = best-effort, depend on the
@@ -42,9 +44,11 @@ local Config = {
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
     -- Weapon (best-effort)
     InfAmmoOn = false, FastFireOn = false, FireDelay = 0.03,
-    -- HvH / Rage (enabled from load per request)
+    -- HvH / Rage
     AutoFire = true, AutoFireDelay = 0.08, SilentAim = true,
+    TriggerBotOn = false, TriggerBotFOV = 26, TriggerBotDelay = 0.05, TriggerBotVisible = true,
     AntiAimOn = false, AntiAimMode = "Spin", AntiAimSpeed = 20,
+    AntiAimPitchMode = "Off", AntiAimPitch = 0,
     ThirdPerson = false, ThirdPersonZoom = 12,
     -- ESP
     ESPOn = false, ESPTeamColor = true, ESPColor = Color3.fromRGB(217, 119, 87),
@@ -53,20 +57,20 @@ local Config = {
     NoClipOn = false, NoClipSpeed = 60, WalkOn = false, WalkSpeed = 16, JumpOn = false, JumpPower = 50,
     -- Utility
     AntiKickOn = false,
-    -- Interface  (Claude 🦀 style)
+    -- Interface
     Accent = Color3.fromRGB(217, 119, 87), MenuKey = Enum.KeyCode.RightControl,
-    UIScale = 1, UISounds = true, MenuBlur = true, WatermarkAnim = true,
+    UIScale = 1, UISounds = true, MenuBlur = true,
     ShowAimBtn = true, ShowNoClipBtn = true,
     ConfigName = "default",
 }
 
 -- ============================ THEME (Claude) ===================
 local Theme = {
-    Bg = Color3.fromRGB(23, 21, 19), Bg2 = Color3.fromRGB(31, 28, 25),
-    Panel = Color3.fromRGB(40, 36, 32), PanelHi = Color3.fromRGB(50, 45, 40),
-    Track = Color3.fromRGB(66, 60, 54), Text = Color3.fromRGB(240, 236, 228),
-    Sub = Color3.fromRGB(162, 154, 142), Stroke = Color3.fromRGB(255, 252, 245),
-    Good = Color3.fromRGB(122, 184, 122), Bad = Color3.fromRGB(214, 99, 91),
+    Bg = Color3.fromRGB(18, 17, 16), Bg2 = Color3.fromRGB(24, 22, 21),
+    Panel = Color3.fromRGB(30, 28, 26), PanelHi = Color3.fromRGB(38, 35, 33),
+    Track = Color3.fromRGB(52, 48, 44), Text = Color3.fromRGB(237, 233, 226),
+    Sub = Color3.fromRGB(138, 131, 122), Stroke = Color3.fromRGB(255, 255, 255),
+    Good = Color3.fromRGB(120, 180, 120), Bad = Color3.fromRGB(210, 100, 95),
 }
 
 -- ============================ HELPERS ==========================
@@ -180,57 +184,40 @@ local WIN_W, WIN_H, RAIL_W = 566, 400, 140
 local window = new("Frame", { Name = "Window", AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, WIN_W, 0, WIN_H),
     BackgroundColor3 = Theme.Bg, BorderSizePixel = 0, Visible = false }, gui)
-corner(window, 16); stroke(window, Theme.Stroke, 1, 0.84)
+corner(window, 13); stroke(window, Theme.Stroke, 1, 0.9)
 local uiScale = new("UIScale", { Scale = 1 }, window)
-new("ImageLabel", { Size = UDim2.new(1, 46, 1, 46), Position = UDim2.new(0, -23, 0, -23),
-    BackgroundTransparency = 1, Image = "rbxassetid://6014261993", ImageColor3 = Color3.new(0, 0, 0),
-    ImageTransparency = 0.35, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450),
-    ZIndex = 0 }, window)
 
--- title bar with animated accent gradient (shimmer)
-local titleBar = new("Frame", { Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = Theme.Bg2, BorderSizePixel = 0 }, window)
-corner(titleBar, 16)
-new("Frame", { Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 1, -16),
+-- title bar (flat, minimal)
+local titleBar = new("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = Theme.Bg2, BorderSizePixel = 0 }, window)
+corner(titleBar, 13)
+new("Frame", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14),
     BackgroundColor3 = Theme.Bg2, BorderSizePixel = 0 }, titleBar)
-local accentBar = accent(new("Frame", { Size = UDim2.new(1, -24, 0, 2), Position = UDim2.new(0, 12, 1, -2),
-    BorderSizePixel = 0 }, titleBar), "BackgroundColor3")
-local accentGrad = gradient(accentBar, Config.Accent, Color3.fromRGB(255, 200, 150), 0)
-local logo = new("TextLabel", { Size = UDim2.new(0, 28, 1, 0), Position = UDim2.new(0, 14, 0, 0),
-    BackgroundTransparency = 1, Text = "🦀", Font = Enum.Font.GothamBold, TextSize = 18 }, titleBar)
-new("TextLabel", { Size = UDim2.new(0, 120, 1, 0), Position = UDim2.new(0, 44, 0, 0), BackgroundTransparency = 1,
+new("TextLabel", { Size = UDim2.new(0, 60, 1, 0), Position = UDim2.new(0, 16, 0, 0), BackgroundTransparency = 1,
     Text = "ERA", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Text,
-    Font = Enum.Font.GothamBold, TextSize = 18 }, titleBar)
-new("TextLabel", { Size = UDim2.new(0, 60, 1, 0), Position = UDim2.new(0, 84, 0, 0), BackgroundTransparency = 1,
-    Text = "v9 🦀", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Sub,
+    Font = Enum.Font.GothamBold, TextSize = 16 }, titleBar)
+local accentDot = accent(new("Frame", { Size = UDim2.new(0, 6, 0, 6), Position = UDim2.new(0, 54, 0.5, -3),
+    BorderSizePixel = 0 }, titleBar), "BackgroundColor3")
+corner(accentDot, 3)
+new("TextLabel", { Size = UDim2.new(0, 60, 1, 0), Position = UDim2.new(0, 68, 0, 0), BackgroundTransparency = 1,
+    Text = "v9", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Sub,
     Font = Enum.Font.GothamMedium, TextSize = 12 }, titleBar)
-local closeBtn = new("TextButton", { Size = UDim2.new(0, 28, 0, 28), Position = UDim2.new(1, -40, 0.5, -14),
-    BackgroundColor3 = Theme.Panel, Text = "✕", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold,
-    TextSize = 13, AutoButtonColor = false }, titleBar)
-corner(closeBtn, 8)
+local closeBtn = new("TextButton", { Size = UDim2.new(0, 26, 0, 26), Position = UDim2.new(1, -36, 0.5, -13),
+    BackgroundColor3 = Theme.Panel, Text = "✕", TextColor3 = Theme.Sub, Font = Enum.Font.GothamBold,
+    TextSize = 12, AutoButtonColor = false }, titleBar)
+corner(closeBtn, 7)
 makeDraggable(window, titleBar)
 
--- animated shimmer on the accent bar
-task.spawn(function()
-    while gui.Parent do
-        if Config.WatermarkAnim then tween(accentGrad, { Rotation = 25 }, 1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut); task.wait(1.6)
-            tween(accentGrad, { Rotation = -25 }, 1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut); task.wait(1.6)
-        else task.wait(0.5) end
-    end
-end)
-
--- rail
-local rail = new("Frame", { Size = UDim2.new(0, RAIL_W, 1, -46), Position = UDim2.new(0, 0, 0, 46),
+-- rail (text-only tabs)
+local rail = new("Frame", { Size = UDim2.new(0, RAIL_W, 1, -44), Position = UDim2.new(0, 0, 0, 44),
     BackgroundColor3 = Theme.Bg2, BorderSizePixel = 0 }, window)
 new("Frame", { Size = UDim2.new(0, 1, 1, -16), Position = UDim2.new(1, -1, 0, 8), BackgroundColor3 = Theme.Stroke,
-    BackgroundTransparency = 0.9, BorderSizePixel = 0 }, rail)
-local railList = new("Frame", { Size = UDim2.new(1, 0, 1, -44), Position = UDim2.new(0, 0, 0, 8),
+    BackgroundTransparency = 0.92, BorderSizePixel = 0 }, rail)
+local railList = new("Frame", { Size = UDim2.new(1, 0, 1, -16), Position = UDim2.new(0, 0, 0, 8),
     BackgroundTransparency = 1 }, rail)
-new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder,
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
     HorizontalAlignment = Enum.HorizontalAlignment.Center }, railList)
-new("TextLabel", { Size = UDim2.new(1, -16, 0, 28), Position = UDim2.new(0, 8, 1, -34), BackgroundTransparency = 1,
-    Text = "🦀 Claude style", TextColor3 = Theme.Sub, Font = Enum.Font.Gotham, TextSize = 11 }, rail)
 
-local content = new("Frame", { Size = UDim2.new(1, -RAIL_W, 1, -46), Position = UDim2.new(0, RAIL_W, 0, 46),
+local content = new("Frame", { Size = UDim2.new(1, -RAIL_W, 1, -44), Position = UDim2.new(0, RAIL_W, 0, 44),
     BackgroundTransparency = 1 }, window)
 
 -- ============================ TAB SYSTEM =======================
@@ -238,9 +225,8 @@ local Tabs, currentTab   -- forward-declared for applyAccent
 local function applyAccent(col)
     Config.Accent = col
     for _, e in ipairs(accentObjects) do if e[1] and e[1].Parent then pcall(function() e[1][e[2]] = col end) end end
-    pcall(function() accentGrad.Color = ColorSequence.new(col, Color3.fromRGB(255, 200, 150)) end)
     if Tabs then for _, t in ipairs(Tabs) do
-        if t == currentTab then t.icon.TextColor3 = col end
+        if t == currentTab then t.label.TextColor3 = col end
         pcall(function() t.page.ScrollBarImageColor3 = col end)
     end end
 end
@@ -252,32 +238,29 @@ local function selectTab(tab)
         local sel = t == tab
         t.page.Visible = sel
         tween(t.btn, { BackgroundColor3 = sel and Theme.Panel or Theme.Bg2 }, 0.15)
-        tween(t.label, { TextColor3 = sel and Theme.Text or Theme.Sub }, 0.15)
-        t.icon.TextColor3 = sel and Config.Accent or Theme.Sub
+        tween(t.label, { TextColor3 = sel and Config.Accent or Theme.Sub }, 0.15)
         t.indic.Visible = sel
     end
     currentTab = tab
 end
-local function addTab(name, icon)
-    local btn = new("TextButton", { Size = UDim2.new(1, -16, 0, 36), BackgroundColor3 = Theme.Bg2, Text = "",
+local function addTab(name)
+    local btn = new("TextButton", { Size = UDim2.new(1, -14, 0, 34), BackgroundColor3 = Theme.Bg2, Text = "",
         AutoButtonColor = false, LayoutOrder = #Tabs + 1 }, railList)
-    corner(btn, 9)
-    local indic = accent(new("Frame", { Size = UDim2.new(0, 3, 0, 18), Position = UDim2.new(0, 0, 0.5, -9),
+    corner(btn, 8)
+    local indic = accent(new("Frame", { Size = UDim2.new(0, 2, 0, 16), Position = UDim2.new(0, 0, 0.5, -8),
         BorderSizePixel = 0, Visible = false }, btn), "BackgroundColor3")
-    corner(indic, 2)
-    local ico = new("TextLabel", { Size = UDim2.new(0, 24, 1, 0), Position = UDim2.new(0, 12, 0, 0),
-        BackgroundTransparency = 1, Text = icon or "•", TextColor3 = Theme.Sub, Font = Enum.Font.GothamBold, TextSize = 15 }, btn)
-    local lbl = new("TextLabel", { Size = UDim2.new(1, -42, 1, 0), Position = UDim2.new(0, 40, 0, 0),
+    corner(indic, 1)
+    local lbl = new("TextLabel", { Size = UDim2.new(1, -26, 1, 0), Position = UDim2.new(0, 16, 0, 0),
         BackgroundTransparency = 1, Text = name, TextXAlignment = Enum.TextXAlignment.Left,
         TextColor3 = Theme.Sub, Font = Enum.Font.GothamMedium, TextSize = 13 }, btn)
     local page = new("ScrollingFrame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false,
-        BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = Config.Accent,
+        BorderSizePixel = 0, ScrollBarThickness = 2, ScrollBarImageColor3 = Config.Accent,
         ScrollBarImageTransparency = 0.5, CanvasSize = UDim2.new(0, 0, 0, 0),
         AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y }, content)
-    new("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+    new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, page)
     new("UIPadding", { PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
         PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 12) }, page)
-    local tab = { btn = btn, page = page, icon = ico, label = lbl, indic = indic }
+    local tab = { btn = btn, page = page, label = lbl, indic = indic }
     table.insert(Tabs, tab)
     btn.MouseButton1Click:Connect(function() selectTab(tab); playSound("hover") end)
     if #Tabs == 1 then selectTab(tab) end
@@ -607,6 +590,15 @@ local fovCircle = newDraw("Circle", { Thickness = 1.6, NumSides = 64, Filled = f
 local rainbowHue = 0
 -- Auto Fire: shoots the equipped Tool via Tool:Activate() (works on PC AND mobile) once the
 -- crosshair is on the target. Silent Aim flicks the camera onto the head for the shot frame.
+-- fire the equipped weapon (works PC + mobile). Tool:Activate() is the cross-platform path;
+-- mouse1click is a fallback for click-driven guns on executors that expose it.
+local function fireWeapon()
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool then pcall(function() tool:Activate() end); return true end
+    if mouse1click then pcall(function() mouse1click() end); return true end
+    return false
+end
 local lastFire = 0
 local function tryAutoFire(part, C)
     local sp, on = C:WorldToViewportPoint(part.Position)
@@ -617,10 +609,40 @@ local function tryAutoFire(part, C)
     if now - lastFire < math.max(0.03, Config.AutoFireDelay) then return end
     lastFire = now
     if Config.SilentAim then C.CFrame = CFrame.new(C.CFrame.Position, aimAt(part)) end  -- flick onto the head
-    local char = LocalPlayer.Character
-    local tool = char and char:FindFirstChildOfClass("Tool")
-    if tool then pcall(function() tool:Activate() end)
-    elseif mouse1click then pcall(function() mouse1click() end) end
+    fireWeapon()
+end
+-- Trigger Bot: fires the instant your crosshair is on an enemy — no aim movement at all.
+-- Scores the nearest enemy part in screen space; a small FOV = pixel-precise, larger = forgiving.
+-- Independent of the aimbot: works with aim off. Optional wall check via a single raycast.
+local lastTrig = 0
+local function tryTrigger(C)
+    local now = os.clock()
+    if now - lastTrig < math.max(0.02, Config.TriggerBotDelay) then return end
+    local center = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
+    local bestD, bestP = Config.TriggerBotFOV, nil
+    for _, p in ipairs(others()) do
+        if enemyCheck(p) and isAlive(p) then
+            local part = partOf(p)
+            if part then
+                local sp, on = C:WorldToViewportPoint(part.Position)
+                if on then
+                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                    if d <= bestD then bestD, bestP = d, part end
+                end
+            end
+        end
+    end
+    if not bestP then return end
+    if Config.TriggerBotVisible then
+        local from = C.CFrame.Position
+        local dir = bestP.Position - from
+        local rp = RaycastParams.new(); rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = { LocalPlayer.Character }
+        local hit = Workspace:Raycast(from, dir, rp)
+        if hit and not (bestP.Parent and hit.Instance:IsDescendantOf(bestP.Parent)) and hit.Distance < dir.Magnitude - 6 then return end
+    end
+    lastTrig = now
+    fireWeapon()
 end
 RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, function(dt)
     local C = cam()
@@ -639,6 +661,7 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
             (Config.AimOn or Config.AutoFire) and "ON" or "off", cnt,
             (lockedTarget and lockedTarget.Parent) and lockedTarget.Name or "NONE", Config.AimMethod)
     end
+    if Config.TriggerBotOn then tryTrigger(C) end   -- fires on-crosshair, independent of the aimbot
     if not Config.AimOn and not Config.AutoFire then aiming = false; return end
     if Config.AimOn then
         if Config.AimMode == "Always" then aiming = true
@@ -687,7 +710,15 @@ local function setAntiAim(on)
             elseif m == "Left" then off = math.pi / 2
             elseif m == "Right" then off = -math.pi / 2
             else off = 0 end
-            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, camYaw + off, 0)
+            -- custom pitch: leans the replicated body up/down so enemy aimbots aiming at your
+            -- head/torso miss vertically. Local first-person view is unaffected (it's the root).
+            local pitch = 0
+            local pm = Config.AntiAimPitchMode
+            if pm == "Static" then pitch = math.rad(Config.AntiAimPitch)
+            elseif pm == "Jitter" then pitch = math.rad((math.floor(t * Config.AntiAimSpeed * 2) % 2 == 0) and Config.AntiAimPitch or -Config.AntiAimPitch)
+            elseif pm == "Down" then pitch = math.rad(-75)
+            elseif pm == "Up" then pitch = math.rad(75) end
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(pitch, camYaw + off, 0)
         end)
     elseif not on and antiAimConn then
         antiAimConn:Disconnect(); antiAimConn = nil
@@ -926,13 +957,13 @@ end
 
 local aimBtn, ncBtn   -- mobile buttons (created later; forward-declared so Settings toggles can hide them)
 -- ============================ BUILD TABS =======================
-local combat = addTab("Combat",  "⌖")
-local rage   = addTab("Rage",    "🔥")
-local weapon = addTab("Weapon",  "▤")
-local visual = addTab("Visuals", "◉")
-local moveT  = addTab("Movement","➤")
-local utilT  = addTab("Utility", "🛡")
-local setT   = addTab("Settings","⚙")
+local combat = addTab("Combat")
+local rage   = addTab("Rage")
+local weapon = addTab("Weapon")
+local visual = addTab("Visuals")
+local moveT  = addTab("Movement")
+local utilT  = addTab("Utility")
+local setT   = addTab("Settings")
 
 -- Combat
 section(combat, "Aimbot")
@@ -963,12 +994,20 @@ section(rage, "Auto Fire")
 Toggle(rage, "Auto Fire (shoots what it sees)", "AutoFire")
 Toggle(rage, "Silent Aim (flick on shot)", "SilentAim")
 Slider(rage, "Fire Delay", "AutoFireDelay", 0.03, 0.6, 3)
-hint(rage, "Auto-fires the equipped weapon (Tool:Activate) at the nearest target in FOV. Set FOV/Target Part in the Combat tab. Client-hit games (like this one) register the head shot.")
+hint(rage, "Auto-fires the equipped weapon at the nearest target in FOV. Set FOV / Target Part in the Combat tab.")
+section(rage, "Trigger Bot")
+Toggle(rage, "Trigger Bot", "TriggerBotOn")
+Slider(rage, "Trigger FOV (px)", "TriggerBotFOV", 4, 120, 0)
+Slider(rage, "Trigger Delay", "TriggerBotDelay", 0.0, 0.4, 3)
+Toggle(rage, "Trigger Wall Check", "TriggerBotVisible")
+hint(rage, "Shoots the instant your crosshair sits on an enemy — no aim movement. Small FOV = pixel-precise, larger = forgiving. Works with the aimbot off.")
 section(rage, "Anti-Aim")
 Toggle(rage, "Anti-Aim", "AntiAimOn", function(on) setAntiAim(on) end)
-Dropdown(rage, "Mode", "AntiAimMode", { "Spin", "Backwards", "Jitter", "Left", "Right" })
-Slider(rage, "Spin Speed", "AntiAimSpeed", 2, 60, 0)
-hint(rage, "Rotates your character so enemy aimbots mis-track. Fights the game's own rotation — may look jittery and can affect movement. Game-dependent.")
+Dropdown(rage, "Yaw Mode", "AntiAimMode", { "Spin", "Backwards", "Jitter", "Left", "Right" })
+Slider(rage, "Yaw Speed", "AntiAimSpeed", 2, 60, 0)
+Dropdown(rage, "Pitch Mode", "AntiAimPitchMode", { "Off", "Static", "Jitter", "Down", "Up" })
+Slider(rage, "Pitch Angle", "AntiAimPitch", -89, 89, 0)
+hint(rage, "Yaw spins/flips your body; Pitch leans it up/down so enemy aimbots miss vertically. Static/Jitter use the Pitch Angle. Fights the game's rotation — game-dependent.")
 section(rage, "Camera")
 Toggle(rage, "Third Person", "ThirdPerson", function(on) setThirdPerson(on) end)
 Slider(rage, "3rd Person Zoom", "ThirdPersonZoom", 5, 30, 0)
@@ -1009,12 +1048,11 @@ section(setT, "Interface")
 Keybind(setT, "Menu Key", "MenuKey", function(k) if typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then Config.MenuKey = k end end)
 Toggle(setT, "UI Sounds", "UISounds")
 Toggle(setT, "Background Blur", "MenuBlur", function(on) if not on then tween(menuBlur, { Size = 0 }, 0.2) elseif window.Visible then tween(menuBlur, { Size = 14 }, 0.2) end end)
-Toggle(setT, "Watermark Animation", "WatermarkAnim")
 section(setT, "Mobile Buttons")
 Toggle(setT, "Show AIM Button", "ShowAimBtn", function(on) if aimBtn then aimBtn.Visible = on end end)
 Toggle(setT, "Show NOCLIP Button", "ShowNoClipBtn", function(on) if ncBtn then ncBtn.Visible = on end end)
 hint(setT, "Menu opens by tapping the watermark (top-left).")
-local accents = { { "Claude 🦀", Color3.fromRGB(217,119,87) }, { "Blue", Color3.fromRGB(0,170,255) },
+local accents = { { "Coral", Color3.fromRGB(217,119,87) }, { "Blue", Color3.fromRGB(0,170,255) },
     { "Purple", Color3.fromRGB(150,90,255) }, { "Pink", Color3.fromRGB(255,45,120) }, { "Green", Color3.fromRGB(46,204,113) } }
 local accRow = row(setT, 44)
 new("TextLabel", { Size = UDim2.new(0, 90, 1, 0), Position = UDim2.new(0, 14, 0, 0), BackgroundTransparency = 1,
@@ -1028,22 +1066,20 @@ for idx, a in ipairs(accents) do
 end
 local uiScaleSlider = Slider(setT, "UI Scale", "UIScale", 0.7, 1.3, 2, function(v) uiScale.Scale = v end)
 section(setT, "Config System")
-Button(setT, "💾  Save Config", Theme.Panel, function() saveConfig() end)
-Button(setT, "📂  Load Config", Theme.Panel, function() loadConfig() end)
+Button(setT, "Save Config", Theme.Panel, function() saveConfig() end)
+Button(setT, "Load Config", Theme.Panel, function() loadConfig() end)
 if not fileReady() then hint(setT, "This executor has no file API (writefile/readfile) — config save/load unavailable.") end
 section(setT, "Session")
 Button(setT, "Unload ERA", Theme.Bad, function() ERA_UNLOAD() end)
 
 -- ============================ WATERMARK ========================
-local wm = new("Frame", { Position = UDim2.new(0, 20, 0, 20), Size = UDim2.new(0, 300, 0, 32),
+local wm = new("Frame", { Position = UDim2.new(0, 18, 0, 18), Size = UDim2.new(0, 236, 0, 30),
     BackgroundColor3 = Theme.Bg2, BorderSizePixel = 0 }, gui)
-corner(wm, 9); stroke(wm, Theme.Stroke, 1, 0.86)
-local wmBar = accent(new("Frame", { Size = UDim2.new(0, 3, 1, -12), Position = UDim2.new(0, 7, 0, 6), BorderSizePixel = 0 }, wm), "BackgroundColor3")
-gradient(wmBar, Config.Accent, Color3.fromRGB(255, 200, 150), 90)
-local wmCrab = new("TextLabel", { Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(0, 14, 0, 0), BackgroundTransparency = 1,
-    Text = "🦀", Font = Enum.Font.GothamBold, TextSize = 14 }, wm)
-local wmTxt = new("TextLabel", { Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 36, 0, 0), BackgroundTransparency = 1,
-    Text = "ERA v9", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Text,
+corner(wm, 8); stroke(wm, Theme.Stroke, 1, 0.9)
+local wmBar = accent(new("Frame", { Size = UDim2.new(0, 3, 1, -12), Position = UDim2.new(0, 8, 0, 6), BorderSizePixel = 0 }, wm), "BackgroundColor3")
+corner(wmBar, 2)
+local wmTxt = new("TextLabel", { Size = UDim2.new(1, -26, 1, 0), Position = UDim2.new(0, 18, 0, 0), BackgroundTransparency = 1,
+    Text = "ERA", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Text,
     Font = Enum.Font.GothamMedium, TextSize = 12 }, wm)
 makeDraggable(wm)
 -- On-screen aim debug (shows whether the bot sees enemies / picks a target)
@@ -1061,8 +1097,7 @@ task.spawn(function()
         local ping = "-"
         pcall(function() if Stats and Stats.Network and Stats.Network.ServerStatsItem then
             ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) .. "ms" end end)
-        wmTxt.Text = string.format("ERA v9  •  %d fps  •  %s  •  %s", fps, ping, LocalPlayer.Name)
-        if Config.WatermarkAnim then tween(wmCrab, { Rotation = 12 }, 0.3); task.wait(0.15); tween(wmCrab, { Rotation = -12 }, 0.3) end
+        wmTxt.Text = string.format("ERA  •  %d fps  •  %s", fps, ping)
     end
 end)
 
@@ -1203,7 +1238,7 @@ function ERA_UNLOAD()
     if fovCircle then pcall(function() fovCircle:Remove() end) end
     pcall(function() menuBlur:Destroy() end)
     if LocalPlayer.Character then setInvisible(LocalPlayer.Character, false) end
-    Notify("ERA unloaded 🦀", 1.4)
+    Notify("ERA unloaded", 1.4)
     task.delay(0.5, function() if gui then gui:Destroy() end end)
 end
 
@@ -1242,6 +1277,6 @@ if not loadedConfig then
     uiScaleSlider.set(math.clamp(math.min(vp.X / 660, vp.Y / 480), 0.7, 1))
 end
 
-Notify("ERA v9 🦀 loaded — tap the watermark (top-left) or press " .. (typeof(Config.MenuKey) == "EnumItem" and Config.MenuKey.Name or "MenuKey"), 4, Config.Accent)
-if Config.AutoFire then Notify("🔥 Auto Fire is ON (Rage tab) — it aims & shoots enemies in FOV", 5, Theme.Bad) end
-print("[ERA] v9 Claude edition loaded 🦀")
+Notify("ERA loaded — tap the watermark (top-left) or press " .. (typeof(Config.MenuKey) == "EnumItem" and Config.MenuKey.Name or "MenuKey"), 4, Config.Accent)
+if Config.AutoFire then Notify("Auto Fire is ON (Rage tab) — it aims & shoots enemies in FOV", 5, Theme.Bad) end
+print("[ERA] v9 minimal edition loaded")

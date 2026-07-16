@@ -528,7 +528,15 @@ local aiming, aimToggleState, aimMobile, lockedTarget = false, false, false, nil
 local aimDbg   -- on-screen debug label (created in the UI section); shows player/target state
 local function partOf(p)
     local c = p.Character; if not c then return end
-    return c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Head")
+    -- try the chosen part + the usual names first
+    local named = c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("Head")
+        or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("UpperTorso") or c:FindFirstChild("Torso")
+    if named and named:IsA("BasePart") then return named end
+    -- custom rig fallback: Humanoid's root, the model's PrimaryPart, or ANY part in the model
+    local hum = c:FindFirstChildWhichIsA("Humanoid")
+    if hum and hum.RootPart then return hum.RootPart end
+    if c.PrimaryPart then return c.PrimaryPart end
+    return c:FindFirstChildWhichIsA("BasePart", true)
 end
 local function isAlive(p)
     local c = p.Character

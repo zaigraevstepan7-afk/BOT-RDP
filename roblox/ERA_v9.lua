@@ -5,7 +5,7 @@
     Combat   : Aimbot (Camera/Silent, Hold/Toggle, FOV, smooth, prediction,
                team/visible/wall checks, sticky), Hitbox Expander.
     Weapon   : Infinite Ammo, Fast Fire        (best-effort, game-dependent).
-    Visuals  : ESP  (Highlight + Box/Name/Distance/Health/Tracer, max distance).
+    Visuals  : ESP  (Highlight chams through walls, team colour).
     Movement : NoClip Fly (fly with the normal joystick/WASD, follows the camera,
                passes through walls), WalkSpeed, JumpPower.
     Utility  : Anti-Kick (best-effort, needs an executor with hookmetamethod).
@@ -43,8 +43,6 @@ local Config = {
     InfAmmoOn = false, FastFireOn = false, FireDelay = 0.03,
     -- ESP
     ESPOn = false, ESPTeamColor = true, ESPColor = Color3.fromRGB(217, 119, 87),
-    ESPBox = true, ESPName = true, ESPDistance = true, ESPHealth = true,
-    ESPTracer = false, ESPMaxDist = 1000,
     -- Self / movement
     InvisOn = false,
     NoClipOn = false, NoClipSpeed = 60, WalkOn = false, WalkSpeed = 16, JumpOn = false, JumpPower = 50,
@@ -481,12 +479,8 @@ local function setInvisible(char, on)
     end
 end
 
--- ---- ESP (Highlight + Drawing box/name/dist/health/tracer) ----
+-- Drawing helper (used by the aimbot FOV circle; guarded if the executor lacks Drawing)
 local hasDrawing = Drawing ~= nil
-local esp = {}   -- player -> { hl, box, name, dist, hpbg, hp, tracer }
--- Highlights must live in a normal container (CoreGui), NOT inside a ScreenGui,
--- or they silently fail to render. Parent a Folder next to our gui.
-local espFolder = new("Folder", { Name = "ERA_ESP" }, gui.Parent or gui)
 local function newDraw(t, props)
     if not hasDrawing then return nil end
     local ok, d = pcall(function() return Drawing.new(t) end)
@@ -494,88 +488,33 @@ local function newDraw(t, props)
     if props then for k, v in pairs(props) do pcall(function() d[k] = v end) end end
     return d
 end
-local function makeEsp(p)
-    if esp[p] then return esp[p] end
-    local e = {}
-    e.hl = new("Highlight", { FillTransparency = 0.55, OutlineTransparency = 0,
-        FillColor = Config.ESPColor, OutlineColor = Color3.new(1,1,1),
-        DepthMode = Enum.HighlightDepthMode.AlwaysOnTop }, espFolder)
-    e.box    = newDraw("Square", { Thickness = 1, Filled = false, Color = Config.ESPColor })
-    e.name   = newDraw("Text",   { Size = 13, Center = true, Outline = true, Color = Color3.new(1,1,1) })
-    e.dist   = newDraw("Text",   { Size = 12, Center = true, Outline = true, Color = Color3.fromRGB(220,220,220) })
-    e.hpbg   = newDraw("Square", { Thickness = 1, Filled = true, Color = Color3.new(0,0,0) })
-    e.hp     = newDraw("Square", { Thickness = 1, Filled = true, Color = Config.Good })
-    e.tracer = newDraw("Line",   { Thickness = 1, Color = Config.ESPColor })
-    esp[p] = e
-    return e
-end
-local function hideEsp(e)
-    for _, k in ipairs({ "box", "name", "dist", "hpbg", "hp", "tracer" }) do if e[k] then e[k].Visible = false end end
-    if e.hl then e.hl.Enabled = false end
-end
-local function removeEsp(p)
-    local e = esp[p]; if not e then return end
-    if e.hl then e.hl:Destroy() end
-    for _, k in ipairs({ "box", "name", "dist", "hpbg", "hp", "tracer" }) do if e[k] then pcall(function() e[k]:Remove() end) end end
-    esp[p] = nil
-end
-local function clearAllEsp() for p in pairs(esp) do removeEsp(p) end end
 
+-- ---- ESP (simple Highlight chams — the proven-working version) ----
+local espFolder = new("Folder", { Name = "ERA_ESP" }, gui.Parent or gui)
+local highlights = {}   -- player -> Highlight
+local function espColorFor(p)
+    return (Config.ESPTeamColor and p.TeamColor and p.TeamColor.Color) or Config.ESPColor
+end
+local function removeEsp(p) if highlights[p] then highlights[p]:Destroy(); highlights[p] = nil end end
+local function addEsp(p)
+    if p == LocalPlayer or not p.Character then return end
+    local hl = highlights[p]
+    if hl then hl.Adornee = p.Character; hl.FillColor = espColorFor(p); return end
+    highlights[p] = new("Highlight", {
+        FillTransparency = 0.5, OutlineTransparency = 0,
+        FillColor = espColorFor(p), OutlineColor = Color3.new(1, 1, 1),
+        DepthMode = Enum.HighlightDepthMode.AlwaysOnTop, Adornee = p.Character }, espFolder)
+end
+local function refreshEsp()
+    for _, p in ipairs(others()) do if Config.ESPOn then addEsp(p) else removeEsp(p) end end
+end
+local function clearAllEsp() for p in pairs(highlights) do removeEsp(p) end end
+-- light maintenance loop: keeps adornee/colour fresh on respawn & team change
 local espConn
-espConn = RunService.RenderStepped:Connect(function()
-    if not Config.ESPOn then
-        for _, e in pairs(esp) do hideEsp(e) end
-        return
-    end
-    local C = cam(); local vp = C.ViewportSize
+espConn = RunService.Heartbeat:Connect(function()
+    if not Config.ESPOn then return end
     for _, p in ipairs(others()) do
-        local c, hum, hrp = charParts(p)
-        local e = esp[p]
-        if not (c and hum and hrp and hum.Health > 0 and enemyCheck(p)) then
-            if e then hideEsp(e) end
-        else
-            e = e or makeEsp(p)
-            local col = (Config.ESPTeamColor and p.TeamColor and p.TeamColor.Color) or Config.ESPColor
-            local dist = (C.CFrame.Position - hrp.Position).Magnitude
-            if dist > Config.ESPMaxDist then hideEsp(e)
-            else
-                -- highlight (chams)
-                if e.hl then e.hl.Enabled = true; e.hl.Adornee = c; e.hl.FillColor = col end
-                -- project box corners
-                local topV, onTop = C:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
-                local botV, onBot = C:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
-                local onScreen = onTop and onBot
-                if onScreen and hasDrawing then
-                    local h = math.abs(botV.Y - topV.Y)
-                    local w = h * 0.55
-                    local x = topV.X - w / 2
-                    local y = math.min(topV.Y, botV.Y)
-                    -- box
-                    if e.box then e.box.Visible = Config.ESPBox; e.box.Color = col
-                        e.box.Size = Vector2.new(w, h); e.box.Position = Vector2.new(x, y) end
-                    -- name
-                    if e.name then e.name.Visible = Config.ESPName; e.name.Text = p.Name
-                        e.name.Position = Vector2.new(topV.X, y - 16); e.name.Color = col end
-                    -- distance
-                    if e.dist then e.dist.Visible = Config.ESPDistance; e.dist.Text = math.floor(dist) .. "m"
-                        e.dist.Position = Vector2.new(topV.X, y + h + 2) end
-                    -- health bar (left of box)
-                    if e.hpbg and e.hp then
-                        local show = Config.ESPHealth
-                        e.hpbg.Visible = show; e.hp.Visible = show
-                        local frac = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
-                        e.hpbg.Size = Vector2.new(3, h); e.hpbg.Position = Vector2.new(x - 6, y)
-                        e.hp.Size = Vector2.new(3, h * frac); e.hp.Position = Vector2.new(x - 6, y + h * (1 - frac))
-                        e.hp.Color = Color3.fromRGB(math.floor(255 * (1 - frac)), math.floor(200 * frac), 60)
-                    end
-                    -- tracer
-                    if e.tracer then e.tracer.Visible = Config.ESPTracer; e.tracer.Color = col
-                        e.tracer.From = Vector2.new(vp.X / 2, vp.Y); e.tracer.To = Vector2.new(topV.X, y + h) end
-                else
-                    for _, k in ipairs({ "box", "name", "dist", "hpbg", "hp", "tracer" }) do if e[k] then e[k].Visible = false end end
-                end
-            end
-        end
+        if p.Character then addEsp(p) else removeEsp(p) end
     end
 end)
 
@@ -898,15 +837,9 @@ Slider(weapon, "Fire Delay", "FireDelay", 0.0, 0.3, 3)
 
 -- Visuals
 section(visual, "ESP")
-Toggle(visual, "Enable ESP", "ESPOn", function(on) if not on then for _, e in pairs(esp) do hideEsp(e) end end end)
-Toggle(visual, "Box", "ESPBox")
-Toggle(visual, "Name", "ESPName")
-Toggle(visual, "Distance", "ESPDistance")
-Toggle(visual, "Health Bar", "ESPHealth")
-Toggle(visual, "Tracer", "ESPTracer")
-Toggle(visual, "Team Color", "ESPTeamColor")
-Slider(visual, "Max Distance", "ESPMaxDist", 100, 5000, 0)
-if not hasDrawing then hint(visual, "No Drawing API detected — box/name/tracer disabled, Highlight (chams) still works.") end
+Toggle(visual, "Enable ESP", "ESPOn", function(on) if on then refreshEsp() else clearAllEsp() end end)
+Toggle(visual, "Team Color", "ESPTeamColor", function() for _, p in ipairs(others()) do if highlights[p] then highlights[p].FillColor = espColorFor(p) end end end)
+hint(visual, "Chams highlight through walls. Colour = team colour (toggle off for a fixed colour).")
 section(visual, "Self")
 Toggle(visual, "Invisibility", "InvisOn", function(on) if LocalPlayer.Character then setInvisible(LocalPlayer.Character, on) end end)
 
@@ -1114,7 +1047,7 @@ end
 -- ============================ HOOKS ===========================
 local function hookPlayer(p)
     if p == LocalPlayer then return end
-    p.CharacterAdded:Connect(function() task.wait(0.4); if Config.ESPOn then makeEsp(p) end end)
+    p.CharacterAdded:Connect(function() task.wait(0.4); if Config.ESPOn then addEsp(p) end end)
     p.CharacterRemoving:Connect(function() removeEsp(p) end)
 end
 for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end

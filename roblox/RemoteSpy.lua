@@ -1,15 +1,16 @@
 --[[  ERA Remote Spy  ============================================================
   Finds the game's fire / hit remote so a real silent-aim can be built.
 
-    1) Press  ● RECORD
-    2) Fire ONE shot at an enemy (up close)
-    3) Press  ■ STOP
-    4) Read the captured remote(s) in the window — or press COPY and send them.
+  Two modes:
+    • LIST   — passively lists every RemoteEvent/Function in the game. No hooks,
+               it only reads the instance tree. Try this first.
+    • RECORD — live capture of FireServer/InvokeServer WITH arguments via a standard
+               __namecall logger. Opt-in; only hooks when you press it. NOTE: some
+               anti-cheats (e.g. Adonis) detect namecall hooks and will kick you. If
+               that happens, use LIST instead — reading the tree can't be detected.
 
-  Logs every RemoteEvent:FireServer / RemoteFunction:InvokeServer while recording,
-  with the remote's full path and its arguments (so we can see the target / hit pos).
-  Needs an executor with hookmetamethod + getnamecallmethod (Delta, Codex, Synapse,
-  Script-Ware, Fluxus, etc.).
+  Steps for live capture:  RECORD → fire ONE shot at an enemy → STOP → COPY.
+  Needs an executor with hookmetamethod + getnamecallmethod (Delta, Codex, etc.).
 ===============================================================================]]
 
 local Players = game:GetService("Players")
@@ -17,7 +18,7 @@ local UIS     = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 -- ---------------------------------------------------------------- state
-local recording = false
+local recording, hookInstalled = false, false
 local log, order = {}, {}     -- key -> {method, path, count, args} ; keys in capture order
 
 -- ---------------------------------------------------------------- theme / helpers
@@ -35,7 +36,6 @@ local function new(cls, props, parent)
 end
 local function corner(p, r) new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, p) end
 
--- serialize one argument for display
 local function ser(v)
     local t = typeof(v)
     if t == "Instance" then return ("Instance<%s '%s'>"):format(v.ClassName, v.Name)
@@ -52,26 +52,24 @@ pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui"
 if not gui.Parent then pcall(function() gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end) end
 
 local win = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-    Size = UDim2.new(0, 470, 0, 350), BackgroundColor3 = BG, BorderSizePixel = 0 }, gui)
+    Size = UDim2.new(0, 520, 0, 360), BackgroundColor3 = BG, BorderSizePixel = 0 }, gui)
 corner(win, 12)
 new("UIStroke", { Color = Color3.new(1,1,1), Transparency = 0.9, Thickness = 1 }, win)
 
--- title bar
 local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = BG2, BorderSizePixel = 0 }, win)
 corner(bar, 12)
 new("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = BG2, BorderSizePixel = 0 }, bar)
-new("TextLabel", { Size = UDim2.new(1, -170, 1, 0), Position = UDim2.new(0, 14, 0, 0), BackgroundTransparency = 1,
+new("TextLabel", { Size = UDim2.new(1, -190, 1, 0), Position = UDim2.new(0, 14, 0, 0), BackgroundTransparency = 1,
     Text = "ERA Remote Spy", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = TXT,
     Font = Enum.Font.GothamBold, TextSize = 15 }, bar)
-local status = new("TextLabel", { Size = UDim2.new(0, 110, 1, 0), Position = UDim2.new(1, -150, 0, 0), BackgroundTransparency = 1,
-    Text = "idle", TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = SUB,
+local status = new("TextLabel", { Size = UDim2.new(0, 130, 1, 0), Position = UDim2.new(1, -170, 0, 0), BackgroundTransparency = 1,
+    Text = "safe mode", TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = SUB,
     Font = Enum.Font.GothamMedium, TextSize = 12 }, bar)
 local closeBtn = new("TextButton", { Size = UDim2.new(0, 26, 0, 26), Position = UDim2.new(1, -32, 0.5, -13),
     BackgroundColor3 = BG, Text = "×", TextColor3 = SUB, Font = Enum.Font.GothamBold, TextSize = 16 }, bar)
 corner(closeBtn, 7)
 
--- drag
-do
+do  -- drag
     local dragging, startP, startPos
     bar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -89,7 +87,6 @@ do
     end)
 end
 
--- output list
 local scroll = new("ScrollingFrame", { Position = UDim2.new(0, 12, 0, 48), Size = UDim2.new(1, -24, 1, -102),
     BackgroundColor3 = BG2, BorderSizePixel = 0, ScrollBarThickness = 4, ScrollBarImageColor3 = ACCENT,
     CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y }, win)
@@ -98,31 +95,32 @@ local out = new("TextLabel", { Size = UDim2.new(1, -16, 0, 0), Position = UDim2.
     AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = "", TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Top, TextColor3 = TXT, Font = Enum.Font.Code, TextSize = 13, TextWrapped = true }, scroll)
 
--- buttons
 local btnRow = new("Frame", { Size = UDim2.new(1, -24, 0, 38), Position = UDim2.new(0, 12, 1, -46), BackgroundTransparency = 1 }, win)
 new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
     SortOrder = Enum.SortOrder.LayoutOrder }, btnRow)
 local function mkBtn(text, col, ord)
-    local b = new("TextButton", { Size = UDim2.new(0, 103, 1, 0), BackgroundColor3 = col or BG2, Text = text,
+    local b = new("TextButton", { Size = UDim2.new(0, 92, 1, 0), BackgroundColor3 = col or BG2, Text = text,
         TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = true, LayoutOrder = ord }, btnRow)
     corner(b, 8)
     return b
 end
-local recBtn  = mkBtn("● RECORD", ACCENT, 1)
-local stopBtn = mkBtn("■ STOP",  BG2, 2)
-local clrBtn  = mkBtn("CLEAR",   BG2, 3)
-local copyBtn = mkBtn("COPY",    BG2, 4)
+local listBtn = mkBtn("LIST",     ACCENT, 1)
+local recBtn  = mkBtn("● RECORD", BG2, 2)
+local stopBtn = mkBtn("■ STOP",   BG2, 3)
+local clrBtn  = mkBtn("CLEAR",    BG2, 4)
+local copyBtn = mkBtn("COPY",     BG2, 5)
 
 -- ---------------------------------------------------------------- render
 local function refresh()
     if #order == 0 then
-        out.Text = "No remotes captured.\n\n1) Press  ● RECORD\n2) Fire ONE shot at an enemy (up close)\n3) Press  ■ STOP\n4) Read / COPY the remote below and send it."
+        out.Text = "Press  LIST  to list every remote (safe, no hook).\n\nFor live args:  ● RECORD  →  fire ONE shot at an enemy  →  ■ STOP  →  COPY.\n(RECORD installs a stealth hook only when pressed.)"
         return
     end
     local lines = {}
     for _, key in ipairs(order) do
         local e = log[key]
-        lines[#lines + 1] = ("[%dx]  %s\n%s\nargs: %s"):format(e.count, e.method, e.path, e.args ~= "" and e.args or "(none)")
+        local head = e.count > 0 and ("[%dx]  %s"):format(e.count, e.method) or e.method
+        lines[#lines + 1] = head .. "\n" .. e.path .. "\nargs: " .. (e.args ~= "" and e.args or "(none)")
     end
     out.Text = table.concat(lines, "\n\n")
 end
@@ -140,30 +138,53 @@ local function capture(remote, method, packed)
     refresh()
 end
 
--- ---------------------------------------------------------------- hook
-if hookmetamethod and getnamecallmethod then
-    local old
-    old = hookmetamethod(game, "__namecall", function(self, ...)
-        if recording then
-            local ok, method = pcall(getnamecallmethod)
-            if ok and (method == "FireServer" or method == "InvokeServer") then
-                -- skip our own calls; only log the game's remotes (fired when you shoot)
-                if not (checkcaller and checkcaller()) then
-                    local packed = table.pack(...)
-                    task.spawn(function() pcall(capture, self, method, packed) end)
+-- ---------------------------------------------------------------- namecall logger (lazy, opt-in)
+local function installHook()
+    if hookInstalled then return true end
+    if not (hookmetamethod and getnamecallmethod) then return false end
+    local ok = pcall(function()
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            if recording then
+                local ok2, m = pcall(getnamecallmethod)
+                if ok2 and (m == "FireServer" or m == "InvokeServer") then
+                    if not (checkcaller and checkcaller()) then
+                        local packed = table.pack(...)
+                        task.spawn(function() pcall(capture, self, m, packed) end)
+                    end
                 end
             end
-        end
-        return old(self, ...)
+            return old(self, ...)
+        end)
     end)
-else
-    out.Text = "This executor has no hookmetamethod / getnamecallmethod.\nRemote spy needs a full executor (Delta, Codex, Synapse, Script-Ware, Fluxus...)."
+    hookInstalled = ok
+    return ok
 end
 
 -- ---------------------------------------------------------------- buttons
-recBtn.MouseButton1Click:Connect(function()  recording = true;  status.Text = "● recording"; status.TextColor3 = ACCENT end)
-stopBtn.MouseButton1Click:Connect(function() recording = false; status.Text = "stopped";     status.TextColor3 = SUB end)
-clrBtn.MouseButton1Click:Connect(function()  log, order = {}, {}; refresh() end)
+listBtn.MouseButton1Click:Connect(function()
+    log, order = {}, {}
+    for _, v in ipairs(game:GetDescendants()) do
+        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+            local ok, path = pcall(function() return v:GetFullName() end)
+            local key = v.ClassName .. " | " .. (ok and path or v.Name)
+            if not log[key] then
+                log[key] = { method = v.ClassName, path = ok and path or v.Name, count = 0,
+                    args = "(fire once with RECORD to see arguments)" }
+                order[#order + 1] = key
+            end
+        end
+    end
+    refresh()
+    status.Text = ("%d remotes"):format(#order); status.TextColor3 = SUB
+end)
+
+recBtn.MouseButton1Click:Connect(function()
+    if not installHook() then status.Text = "hook unavailable"; status.TextColor3 = SUB; return end
+    recording = true; status.Text = "● recording"; status.TextColor3 = ACCENT
+end)
+stopBtn.MouseButton1Click:Connect(function() recording = false; status.Text = "stopped"; status.TextColor3 = SUB end)
+clrBtn.MouseButton1Click:Connect(function() log, order = {}, {}; refresh() end)
 copyBtn.MouseButton1Click:Connect(function()
     local cb = setclipboard or toclipboard or writeclipboard or (syn and syn.write_clipboard)
     if cb then pcall(cb, out.Text); status.Text = "copied ✓"; status.TextColor3 = ACCENT
@@ -172,4 +193,4 @@ end)
 closeBtn.MouseButton1Click:Connect(function() recording = false; gui:Destroy() end)
 
 refresh()
-print("[ERA] Remote Spy loaded — RECORD, shoot once, STOP.")
+print("[ERA] Remote Spy loaded — LIST is safe; RECORD hooks only when pressed.")

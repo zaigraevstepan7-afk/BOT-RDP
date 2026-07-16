@@ -662,6 +662,9 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
             (Config.AimOn or Config.AutoFire) and "ON" or "off", cnt,
             (lockedTarget and lockedTarget.Parent) and lockedTarget.Name or "NONE", Config.AimMethod)
     end
+    -- Menu open = hands off. Don't move the camera/mouse or fire while the menu is up,
+    -- so the aimbot can't fight your cursor, drag the window, or block the watermark.
+    if window.Visible then aiming = false; lockedTarget = nil; return end
     if Config.TriggerBotOn then tryTrigger(C) end   -- fires on-crosshair, independent of the aimbot
     if not Config.AimOn and not Config.AutoFire then aiming = false; return end
     if Config.AimOn then
@@ -679,7 +682,10 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
     if not engage then lockedTarget = nil; return end
     local part = pickTarget(); if not part then return end
     local goal = aimAt(part)
-    if Config.AimMethod == "Camera" or not mousemoverel then   -- Silent falls back to Camera if the executor lacks mousemoverel
+    -- Silent moves the raw mouse (mousemoverel), which only exists / works with a real mouse.
+    -- On touch devices it did nothing — that's why Silent looked broken on mobile. Fall back to
+    -- the camera path on touch or when mousemoverel is missing, so Silent always actually aims.
+    if Config.AimMethod == "Camera" or isTouch() or not mousemoverel then
         local a = 1 - (1 - math.clamp(Config.Smoothness, 0.05, 1)) ^ (dt * 60)   -- frame-rate independent lerp
         C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), a)
         pcall(function() C.Focus = CFrame.new(goal) end)   -- some first-person games follow Camera.Focus

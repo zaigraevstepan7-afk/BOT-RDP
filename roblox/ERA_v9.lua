@@ -35,6 +35,7 @@ local Config = {
     AimOn = false, AimMethod = "Camera", AimMode = "Toggle",
     AimKey = Enum.UserInputType.MouseButton2,
     FOV = 250, Smoothness = 0.5, Prediction = 0.0, TargetPart = "Head",
+    AimTarget = "Closest",   -- "Closest" (snap to nearest enemy) | "Crosshair" (nearest to aim, within FOV)
     TeamCheck = false, VisibleCheck = false, Wallshot = false, StickyTarget = true,
     ShowFOV = true, FOVRainbow = false,
     -- Hitbox
@@ -550,7 +551,9 @@ local function aimAt(part)
 end
 local function pickTarget()
     local C = cam(); local center = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
-    if Config.StickyTarget and lockedTarget and lockedTarget.Parent and isAlive(lockedTarget) and enemyCheck(lockedTarget) then
+    local closest = Config.AimTarget == "Closest"   -- snap to nearest enemy (like the WRD aimbot); else crosshair+FOV
+    -- sticky only makes sense in crosshair mode
+    if not closest and Config.StickyTarget and lockedTarget and lockedTarget.Parent and isAlive(lockedTarget) and enemyCheck(lockedTarget) then
         local part = partOf(lockedTarget)
         if part then
             local sp, on = C:WorldToViewportPoint(part.Position)
@@ -558,15 +561,21 @@ local function pickTarget()
         end
         lockedTarget = nil
     end
-    local best, bestPart, bestDist = nil, nil, Config.FOV
+    local best, bestPart, bestScore = nil, nil, (closest and math.huge or Config.FOV)
     for _, p in ipairs(others()) do
         if enemyCheck(p) and isAlive(p) then
             local part = partOf(p)
-            if part then
-                local sp, on = C:WorldToViewportPoint(part.Position)
-                if on then
-                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                    if d < bestDist and visibleTo(part) then best, bestPart, bestDist = p, part, d end
+            if part and visibleTo(part) then
+                if closest then
+                    -- nearest by 3D distance, regardless of where it is on screen (camera snaps to it)
+                    local d = (C.CFrame.Position - part.Position).Magnitude
+                    if d < bestScore then best, bestPart, bestScore = p, part, d end
+                else
+                    local sp, on = C:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                        if d < bestScore then best, bestPart, bestScore = p, part, d end
+                    end
                 end
             end
         end
@@ -905,6 +914,7 @@ Slider(combat, "FOV", "FOV", 40, 500, 0)
 Slider(combat, "Smoothness", "Smoothness", 0.02, 1, 2)
 Slider(combat, "Prediction", "Prediction", 0, 0.3, 3)
 Dropdown(combat, "Target Part", "TargetPart", { "Head", "HumanoidRootPart", "Torso", "UpperTorso" })
+Dropdown(combat, "Target", "AimTarget", { "Closest", "Crosshair" })
 section(combat, "Checks")
 Toggle(combat, "Team Check", "TeamCheck")
 Toggle(combat, "Visible Check", "VisibleCheck")

@@ -34,8 +34,8 @@ local Config = {
     -- Aimbot
     AimOn = false, AimMethod = "Camera", AimMode = "Toggle",
     AimKey = Enum.UserInputType.MouseButton2,
-    FOV = 140, Smoothness = 0.35, Prediction = 0.0, TargetPart = "Head",
-    TeamCheck = true, VisibleCheck = false, Wallshot = false, StickyTarget = true,
+    FOV = 250, Smoothness = 0.5, Prediction = 0.0, TargetPart = "Head",
+    TeamCheck = false, VisibleCheck = false, Wallshot = false, StickyTarget = true,
     ShowFOV = true, FOVRainbow = false,
     -- Hitbox
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
@@ -529,8 +529,12 @@ local function partOf(p)
     return c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Head")
 end
 local function isAlive(p)
-    local c = p.Character; local h = c and c:FindFirstChildWhichIsA("Humanoid")
-    return h ~= nil and h.Health > 0
+    local c = p.Character
+    if not c then return false end
+    local h = c:FindFirstChildWhichIsA("Humanoid")
+    if h then return h.Health > 0 end
+    -- some games use custom characters without a standard Humanoid: accept if a body part exists
+    return c:FindFirstChild("HumanoidRootPart") ~= nil or c:FindFirstChild("Head") ~= nil
 end
 local function visibleTo(part)
     if Config.Wallshot or not Config.VisibleCheck then return true end

@@ -44,8 +44,9 @@ local Config = {
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
     -- Weapon (best-effort)
     InfAmmoOn = false, FastFireOn = false, FireDelay = 0.03,
-    -- HvH / Rage
-    AutoFire = true, AutoFireDelay = 0.08, SilentAim = true,
+    -- HvH / Rage  (Auto Fire = rage aimbot+fire, OFF by default so nothing hijacks
+    -- your aim on load; Trigger Bot below is the fire-only option that never aims.)
+    AutoFire = false, AutoFireDelay = 0.08, SilentAim = true,
     TriggerBotOn = false, TriggerBotFOV = 26, TriggerBotDelay = 0.05, TriggerBotVisible = true,
     AntiAimOn = false, AntiAimMode = "Spin", AntiAimSpeed = 20,
     AntiAimPitchMode = "Off", AntiAimPitch = 0,
@@ -990,17 +991,17 @@ Slider(combat, "Hitbox Size", "HitboxSize", 3, 30, 0)
 Dropdown(combat, "Hitbox Part", "HitboxPart", { "HumanoidRootPart", "Head", "Torso" }, function() restoreHitboxes() end)
 
 -- Rage / HvH
-section(rage, "Auto Fire")
-Toggle(rage, "Auto Fire (shoots what it sees)", "AutoFire")
+section(rage, "Auto Fire (rage — moves your aim)")
+Toggle(rage, "Auto Fire (aims + shoots)", "AutoFire")
 Toggle(rage, "Silent Aim (flick on shot)", "SilentAim")
 Slider(rage, "Fire Delay", "AutoFireDelay", 0.03, 0.6, 3)
-hint(rage, "Auto-fires the equipped weapon at the nearest target in FOV. Set FOV / Target Part in the Combat tab.")
-section(rage, "Trigger Bot")
+hint(rage, "RAGE: locks the camera onto the nearest enemy in FOV and fires. This one DOES move your aim. For fire-only with no aim movement, use the Trigger Bot below instead.")
+section(rage, "Trigger Bot (fire only — no aim)")
 Toggle(rage, "Trigger Bot", "TriggerBotOn")
 Slider(rage, "Trigger FOV (px)", "TriggerBotFOV", 4, 120, 0)
 Slider(rage, "Trigger Delay", "TriggerBotDelay", 0.0, 0.4, 3)
 Toggle(rage, "Trigger Wall Check", "TriggerBotVisible")
-hint(rage, "Shoots the instant your crosshair sits on an enemy — no aim movement. Small FOV = pixel-precise, larger = forgiving. Works with the aimbot off.")
+hint(rage, "Shoots the instant YOUR crosshair sits on an enemy — it never moves the camera. You aim manually; it just pulls the trigger. Small FOV = pixel-precise, larger = forgiving.")
 section(rage, "Anti-Aim")
 Toggle(rage, "Anti-Aim", "AntiAimOn", function(on) setAntiAim(on) end)
 Dropdown(rage, "Yaw Mode", "AntiAimMode", { "Spin", "Backwards", "Jitter", "Left", "Right" })

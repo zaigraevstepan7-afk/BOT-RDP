@@ -809,7 +809,7 @@ local setT   = addTab("Settings","⚙")
 
 -- Combat
 section(combat, "Aimbot")
-Toggle(combat, "AimBot", "AimOn", function(on) if not on then aimToggleState = false end; Notify(on and "Aimbot ON" or "Aimbot OFF", 1.3, on and Theme.Good or Theme.Bad) end)
+Toggle(combat, "AimBot", "AimOn", function(on) if not on then aimToggleState = false; aimMobile = false end; Notify(on and "Aimbot ON" or "Aimbot OFF", 1.3, on and Theme.Good or Theme.Bad) end)
 Dropdown(combat, "Method", "AimMethod", { "Camera", "Silent" }, function(v) if v == "Silent" and not mousemoverel then Notify("Silent needs mousemoverel", 3, Theme.Bad) end end)
 Dropdown(combat, "Mode", "AimMode", { "Hold", "Toggle", "Always" }, function() aimToggleState = false end)
 Keybind(combat, "Aim Key", "AimKey")
@@ -958,7 +958,7 @@ local function bindMobile(btn, opts)
         if not active then return end
         if i.UserInputType ~= Enum.UserInputType.Touch and i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
         local d = i.Position - startP
-        if d.Magnitude > 8 then moved = true end
+        if d.Magnitude > 16 then moved = true end   -- tolerant of touch jitter so a tap still counts
         if dragMode then btn.Position = UDim2.new(startBtnP.X.Scale, startBtnP.X.Offset + d.X, startBtnP.Y.Scale, startBtnP.Y.Offset + d.Y) end
     end)
     btn.InputEnded:Connect(function(i)
@@ -975,18 +975,14 @@ aimBtn = mobButton("AIM", UDim2.new(1, -66, 1, -66), Config.Accent)
 ncBtn  = mobButton("NOCLIP", UDim2.new(1, -136, 1, -66), Theme.Bg2)
 aimBtn.Visible = Config.ShowAimBtn
 ncBtn.Visible  = Config.ShowNoClipBtn
-bindMobile(aimBtn, { base = Config.Accent,
-    -- Hold mode: aim while pressed. Toggle mode: tap to switch aiming on/off.
-    onHold    = function() if Config.AimMode == "Hold" then aimMobile = true end end,
-    onRelease = function() if Config.AimMode == "Hold" then aimMobile = false end end,
-    onTap     = function()
-        if Config.AimMode == "Toggle" then
-            if not Config.AimOn and widgets.AimOn then widgets.AimOn.set(true) end  -- auto-enable master
-            aimToggleState = not aimToggleState
-            aimBtn.BackgroundTransparency = aimToggleState and 0 or 0.12
-            Notify(aimToggleState and "Aim ON" or "Aim OFF", 1, aimToggleState and Theme.Good or Theme.Bad)
-        end
-    end })
+-- Mobile AIM: a simple TAP-TOGGLE that drives `aimMobile` (works in any Aim Mode).
+-- Tap once = aim on, tap again = off. It also auto-enables the master AimBot toggle.
+bindMobile(aimBtn, { base = Config.Accent, onTap = function()
+    if not Config.AimOn and widgets.AimOn then widgets.AimOn.set(true) end
+    aimMobile = not aimMobile
+    aimBtn.BackgroundTransparency = aimMobile and 0 or 0.12
+    Notify(aimMobile and "Aim ON" or "Aim OFF", 1.2, aimMobile and Theme.Good or Theme.Bad)
+end })
 bindMobile(ncBtn,  { base = Theme.Bg2, onTap = function() local w = widgets.NoClipOn; if w then w.set(not Config.NoClipOn) end end })
 
 -- ============================ OPEN / CLOSE =====================

@@ -47,7 +47,8 @@ local Config = {
     -- HvH / Rage  (Auto Fire = rage aimbot+fire, OFF by default so nothing hijacks
     -- your aim on load; Trigger Bot below is the fire-only option that never aims.)
     AutoFire = false, AutoFireDelay = 0.08, SilentAim = true, AutoFireWallCheck = true,
-    FireMethod = "Click",   -- Click = synthetic input (safe); Activate = Tool:Activate() (Adonis-type ACs flag it); Auto = both
+    FireMethod = "Click",   -- Click | Tap Button (taps recorded coords) | Activate | Auto
+    FireBtnX = 0, FireBtnY = 0,   -- recorded on-screen fire-button position for the "Tap Button" method
     TriggerBotOn = false, TriggerBotFOV = 26, TriggerBotDelay = 0.05, TriggerBotVisible = true,
     AntiAimOn = false, AntiAimMode = "Spin", AntiAimSpeed = 20,
     AntiAimPitchMode = "Off", AntiAimPitch = 0,
@@ -616,11 +617,62 @@ local function activateTool()   -- namecall path — may be detected; only used 
     if tool then local ok = pcall(function() tool:Activate() end); return ok end
     return false
 end
+-- Tap a recorded on-screen coordinate (the game's own fire button) via simulated input.
+-- Plain input automation — no hooks, no remotes — so the game fires exactly as if you
+-- tapped the button with your finger.
+local function tapAt(x, y)
+    if not VIM or not x or not y or (x == 0 and y == 0) then return false end
+    local touched = pcall(function()
+        VIM:SendTouchEvent(1, x, y, false)
+        VIM:SendTouchEvent(1, x, y, true)
+    end)
+    if touched then return true end
+    return (pcall(function()
+        VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end))
+end
 local function fireWeapon()
     local m = Config.FireMethod or "Click"
+    if m == "Tap Button" then return tapAt(Config.FireBtnX, Config.FireBtnY) end
     if m == "Click" then return clickInput()
     elseif m == "Activate" then return activateTool() or clickInput()
     else return clickInput() or activateTool() end   -- Auto: click first, namecall as fallback
+end
+-- Fire-button recorder: drag a marker over the game's shoot button, save its screen
+-- position, and the "Tap Button" method taps there. Pure input automation (no hooks).
+local fireMarker, fireSaveBtn
+local function saveFireButton()
+    if not fireMarker then return end
+    local c = fireMarker.AbsolutePosition + fireMarker.AbsoluteSize / 2
+    Config.FireBtnX, Config.FireBtnY = math.floor(c.X), math.floor(c.Y)
+    fireMarker.Visible = false
+    if fireSaveBtn then fireSaveBtn.Visible = false end
+    Notify(("Fire button saved at %d, %d — set Fire Method = Tap Button"):format(Config.FireBtnX, Config.FireBtnY), 3.5, Theme.Good)
+end
+local function ensureFireUI()
+    if fireMarker then return end
+    local vp = cam().ViewportSize
+    fireMarker = new("Frame", { Name = "ERA_FireMarker", AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, (Config.FireBtnX > 0 and Config.FireBtnX or vp.X - 90),
+                             0, (Config.FireBtnY > 0 and Config.FireBtnY or vp.Y - 90)),
+        Size = UDim2.new(0, 72, 0, 72), BackgroundColor3 = Config.Accent, BackgroundTransparency = 0.45,
+        BorderSizePixel = 0, Visible = false, ZIndex = 500 }, gui)
+    corner(fireMarker, 36); stroke(fireMarker, Color3.new(1, 1, 1), 2, 0.2)
+    new("TextLabel", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "FIRE\ndrag",
+        TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 13, ZIndex = 501 }, fireMarker)
+    makeDraggable(fireMarker)
+    fireSaveBtn = new("TextButton", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 34),
+        Size = UDim2.new(0, 180, 0, 34), BackgroundColor3 = Theme.Good, Text = "SAVE FIRE POSITION",
+        TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 13, Visible = false, ZIndex = 502 }, gui)
+    corner(fireSaveBtn, 8)
+    fireSaveBtn.MouseButton1Click:Connect(saveFireButton)
+end
+local function placeFireButton()
+    ensureFireUI()
+    local show = not fireMarker.Visible
+    fireMarker.Visible = show; fireSaveBtn.Visible = show
+    if show then Notify("Drag the FIRE marker onto the game's shoot button, then press SAVE.", 4, Config.Accent) end
 end
 -- Always-on line-of-sight check (independent of the aimbot's Visible Check toggle).
 local function losClear(part)
@@ -1035,8 +1087,11 @@ Toggle(rage, "Auto Fire (aims + shoots)", "AutoFire")
 Toggle(rage, "Silent Aim (snap on shot)", "SilentAim")
 Toggle(rage, "Wall Check (skip if behind wall)", "AutoFireWallCheck")
 Slider(rage, "Fire Delay", "AutoFireDelay", 0.03, 0.6, 3)
-Dropdown(rage, "Fire Method", "FireMethod", { "Click", "Activate", "Auto" })
-hint(rage, "RAGE: locks onto the nearest VISIBLE enemy in FOV and fires. Fire Method (used by Auto Fire AND Trigger Bot): Click = synthetic input, safest — no kick; Activate = Tool:Activate(), which Adonis flags as 'namecallInstance' → kick; Auto = Click then Activate. If Click doesn't fire your gun, try Auto.")
+Dropdown(rage, "Fire Method", "FireMethod", { "Click", "Tap Button", "Activate", "Auto" })
+hint(rage, "RAGE: locks onto the nearest VISIBLE enemy in FOV and fires. Fire Method (Auto Fire AND Trigger Bot): Tap Button = taps the on-screen fire button you record below — best for mobile, no hooks; Click = synthetic click; Activate = Tool:Activate(), which Adonis flags as 'namecallInstance' → kick; Auto = Click then Activate.")
+section(rage, "Fire Button (record & tap the real button)")
+Button(rage, "Place / Move Marker", Theme.Panel, function() placeFireButton() end)
+hint(rage, "1) Press Place. 2) Drag the FIRE marker onto the game's shoot button. 3) Press SAVE. 4) Set Fire Method = 'Tap Button' above. Now Auto Fire / Trigger Bot tap that exact spot like a real finger — no hooks, no Tool:Activate.")
 section(rage, "Trigger Bot (fire only — no aim)")
 Toggle(rage, "Trigger Bot", "TriggerBotOn")
 Slider(rage, "Trigger FOV (px)", "TriggerBotFOV", 4, 120, 0)

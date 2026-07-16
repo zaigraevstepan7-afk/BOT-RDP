@@ -37,7 +37,7 @@ local Config = {
     FOV = 250, Smoothness = 0.5, Prediction = 0.0, TargetPart = "Head",
     AimTarget = "Closest",   -- "Closest" (snap to nearest enemy) | "Crosshair" (nearest to aim, within FOV)
     TeamCheck = false, VisibleCheck = false, Wallshot = false, StickyTarget = true,
-    ShowFOV = true, FOVRainbow = false,
+    ShowFOV = true, FOVRainbow = false, AimDebug = true,
     -- Hitbox
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
     -- Weapon (best-effort)
@@ -525,6 +525,7 @@ end)
 
 -- ---- Aimbot ----
 local aiming, aimToggleState, aimMobile, lockedTarget = false, false, false, nil
+local aimDbg   -- on-screen debug label (created in the UI section); shows player/target state
 local function partOf(p)
     local c = p.Character; if not c then return end
     return c:FindFirstChild(Config.TargetPart) or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Head")
@@ -611,6 +612,14 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
         else fovCircle.Color = Config.Accent end
         fovCircle.Position = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
     end
+    if aimDbg then
+        local cnt = 0
+        for _, p in ipairs(others()) do if p.Character and isAlive(p) then cnt = cnt + 1 end end
+        aimDbg.Visible = Config.AimDebug and (Config.AimOn or Config.AutoFire)
+        aimDbg.Text = string.format("AIM %s  |  enemies: %d  |  target: %s  |  %s",
+            (Config.AimOn or Config.AutoFire) and "ON" or "off", cnt,
+            (lockedTarget and lockedTarget.Parent) and lockedTarget.Name or "NONE", Config.AimMethod)
+    end
     if not Config.AimOn and not Config.AutoFire then aiming = false; return end
     if Config.AimOn then
         if Config.AimMode == "Always" then aiming = true
@@ -629,6 +638,7 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
     local goal = aimAt(part)
     if Config.AimMethod == "Camera" then
         C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), math.clamp(Config.Smoothness, 0.02, 1))
+        pcall(function() C.Focus = CFrame.new(goal) end)   -- some first-person games follow Camera.Focus
     elseif mousemoverel then
         local sp, on = C:WorldToViewportPoint(goal)
         if on then mousemoverel((sp.X - C.ViewportSize.X / 2) * Config.Smoothness, (sp.Y - C.ViewportSize.Y / 2) * Config.Smoothness) end
@@ -922,6 +932,7 @@ Toggle(combat, "Wallshot (ignore walls)", "Wallshot")
 Toggle(combat, "Sticky Target", "StickyTarget")
 Toggle(combat, "Show FOV Circle", "ShowFOV")
 Toggle(combat, "FOV Rainbow", "FOVRainbow")
+Toggle(combat, "Aim Debug (on-screen)", "AimDebug")
 section(combat, "Hitbox")
 Toggle(combat, "Hitbox Expander", "HitboxOn", function(on) setHitbox(on) end)
 Slider(combat, "Hitbox Size", "HitboxSize", 3, 30, 0)
@@ -1015,6 +1026,11 @@ local wmTxt = new("TextLabel", { Size = UDim2.new(1, -40, 1, 0), Position = UDim
     Text = "ERA v9", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Text,
     Font = Enum.Font.GothamMedium, TextSize = 12 }, wm)
 makeDraggable(wm)
+-- On-screen aim debug (shows whether the bot sees enemies / picks a target)
+aimDbg = new("TextLabel", { Name = "AimDbg", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 6),
+    Size = UDim2.new(0, 380, 0, 22), BackgroundColor3 = Theme.Bg2, BackgroundTransparency = 0.2,
+    Text = "AIM", TextColor3 = Theme.Text, Font = Enum.Font.GothamMedium, TextSize = 12, Visible = false }, gui)
+corner(aimDbg, 6); stroke(aimDbg, Theme.Stroke, 1, 0.85)
 local wmFrameConn
 task.spawn(function()
     local frames = 0

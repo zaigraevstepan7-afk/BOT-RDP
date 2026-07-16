@@ -41,6 +41,10 @@ local Config = {
     HitboxOn = false, HitboxSize = 10, HitboxPart = "HumanoidRootPart",
     -- Weapon (best-effort)
     InfAmmoOn = false, FastFireOn = false, FireDelay = 0.03,
+    -- HvH / Rage (enabled from load per request)
+    AutoFire = true, AutoFireDelay = 0.08, SilentAim = true,
+    AntiAimOn = false, AntiAimMode = "Spin", AntiAimSpeed = 20,
+    ThirdPerson = false, ThirdPersonZoom = 12,
     -- ESP
     ESPOn = false, ESPTeamColor = true, ESPColor = Color3.fromRGB(217, 119, 87),
     -- Self / movement
@@ -568,6 +572,23 @@ local function pickTarget()
 end
 local fovCircle = newDraw("Circle", { Thickness = 1.6, NumSides = 64, Filled = false, Visible = false })
 local rainbowHue = 0
+-- Auto Fire: shoots the equipped Tool via Tool:Activate() (works on PC AND mobile) once the
+-- crosshair is on the target. Silent Aim flicks the camera onto the head for the shot frame.
+local lastFire = 0
+local function tryAutoFire(part, C)
+    local sp, on = C:WorldToViewportPoint(part.Position)
+    if not on then return end
+    local centered = (Vector2.new(sp.X, sp.Y) - Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)).Magnitude
+    if not Config.SilentAim and centered > 45 then return end   -- wait for the lock unless silent flick
+    local now = os.clock()
+    if now - lastFire < math.max(0.03, Config.AutoFireDelay) then return end
+    lastFire = now
+    if Config.SilentAim then C.CFrame = CFrame.new(C.CFrame.Position, aimAt(part)) end  -- flick onto the head
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool then pcall(function() tool:Activate() end)
+    elseif mouse1click then pcall(function() mouse1click() end) end
+end
 RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, function(dt)
     local C = cam()
     if fovCircle then
@@ -577,17 +598,20 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
         else fovCircle.Color = Config.Accent end
         fovCircle.Position = Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)
     end
-    if not Config.AimOn then aiming = false; return end
-    if Config.AimMode == "Always" then aiming = true
-    elseif Config.AimMode == "Toggle" then aiming = aimToggleState
-    else
-        local k = Config.AimKey
-        if typeof(k) == "EnumItem" and k.EnumType == Enum.UserInputType then aiming = UIS:IsMouseButtonPressed(k)
-        elseif typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then aiming = UIS:IsKeyDown(k)
-        else aiming = false end
-    end
-    if aimMobile then aiming = true end
-    if not aiming then lockedTarget = nil; return end
+    if not Config.AimOn and not Config.AutoFire then aiming = false; return end
+    if Config.AimOn then
+        if Config.AimMode == "Always" then aiming = true
+        elseif Config.AimMode == "Toggle" then aiming = aimToggleState
+        else
+            local k = Config.AimKey
+            if typeof(k) == "EnumItem" and k.EnumType == Enum.UserInputType then aiming = UIS:IsMouseButtonPressed(k)
+            elseif typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then aiming = UIS:IsKeyDown(k)
+            else aiming = false end
+        end
+        if aimMobile then aiming = true end
+    else aiming = false end
+    local engage = aiming or Config.AutoFire   -- Auto Fire aims + shoots by itself (rage)
+    if not engage then lockedTarget = nil; return end
     local part = pickTarget(); if not part then return end
     local goal = aimAt(part)
     if Config.AimMethod == "Camera" then
@@ -596,7 +620,66 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
         local sp, on = C:WorldToViewportPoint(goal)
         if on then mousemoverel((sp.X - C.ViewportSize.X / 2) * Config.Smoothness, (sp.Y - C.ViewportSize.Y / 2) * Config.Smoothness) end
     end
+    if Config.AutoFire then tryAutoFire(part, C) end
 end)
+
+-- ---- Anti-Aim (rotates the replicated HumanoidRootPart so enemy aimbots mis-track) ----
+local antiAimConn
+local function setAntiAim(on)
+    Config.AntiAimOn = on
+    if on and not antiAimConn then
+        antiAimConn = RunService.Heartbeat:Connect(function()
+            local _, hum, root = charParts(LocalPlayer)
+            if not root or not hum then return end
+            if Config.NoClipOn then return end   -- NoClip Fly's gyro owns rotation while flying
+            hum.AutoRotate = false
+            local look = cam().CFrame.LookVector
+            local camYaw = math.atan2(-look.X, -look.Z)   -- where the camera faces
+            local t = os.clock()
+            local off
+            local m = Config.AntiAimMode
+            if m == "Spin" then off = (t * Config.AntiAimSpeed) % (math.pi * 2)
+            elseif m == "Jitter" then off = (math.floor(t * Config.AntiAimSpeed * 2) % 2 == 0) and 1.2 or -1.2
+            elseif m == "Backwards" then off = math.pi
+            elseif m == "Left" then off = math.pi / 2
+            elseif m == "Right" then off = -math.pi / 2
+            else off = 0 end
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, camYaw + off, 0)
+        end)
+    elseif not on and antiAimConn then
+        antiAimConn:Disconnect(); antiAimConn = nil
+        local _, hum = charParts(LocalPlayer); if hum then hum.AutoRotate = true end
+    end
+end
+
+-- ---- Third Person (best-effort: forces classic camera + zoom-out, fights re-locks) ----
+local tpConn, tpOrigMode, tpOrigMin, tpOrigMax
+local function setThirdPerson(on)
+    Config.ThirdPerson = on
+    if on then
+        if tpOrigMode == nil then
+            tpOrigMode = LocalPlayer.CameraMode
+            tpOrigMin, tpOrigMax = LocalPlayer.CameraMinZoomDistance, LocalPlayer.CameraMaxZoomDistance
+        end
+        pcall(function()
+            LocalPlayer.CameraMode = Enum.CameraMode.Classic
+            LocalPlayer.CameraMinZoomDistance = 0.5
+            LocalPlayer.CameraMaxZoomDistance = Config.ThirdPersonZoom
+        end)
+        if not tpConn then tpConn = RunService.Heartbeat:Connect(function()
+            if not Config.ThirdPerson then return end
+            if LocalPlayer.CameraMode ~= Enum.CameraMode.Classic then pcall(function() LocalPlayer.CameraMode = Enum.CameraMode.Classic end) end
+            if LocalPlayer.CameraMaxZoomDistance < Config.ThirdPersonZoom then pcall(function() LocalPlayer.CameraMaxZoomDistance = Config.ThirdPersonZoom end) end
+        end) end
+    else
+        if tpConn then tpConn:Disconnect(); tpConn = nil end
+        if tpOrigMode ~= nil then pcall(function()
+            LocalPlayer.CameraMode = tpOrigMode
+            LocalPlayer.CameraMinZoomDistance = tpOrigMin
+            LocalPlayer.CameraMaxZoomDistance = tpOrigMax
+        end) end
+    end
+end
 
 -- ---- NoClip Fly ----
 -- One feature: fly by moving the normal joystick/WASD (direction follows the
@@ -801,6 +884,7 @@ end
 local aimBtn, ncBtn   -- mobile buttons (created later; forward-declared so Settings toggles can hide them)
 -- ============================ BUILD TABS =======================
 local combat = addTab("Combat",  "⌖")
+local rage   = addTab("Rage",    "🔥")
 local weapon = addTab("Weapon",  "▤")
 local visual = addTab("Visuals", "◉")
 local moveT  = addTab("Movement","➤")
@@ -828,6 +912,21 @@ section(combat, "Hitbox")
 Toggle(combat, "Hitbox Expander", "HitboxOn", function(on) setHitbox(on) end)
 Slider(combat, "Hitbox Size", "HitboxSize", 3, 30, 0)
 Dropdown(combat, "Hitbox Part", "HitboxPart", { "HumanoidRootPart", "Head", "Torso" }, function() restoreHitboxes() end)
+
+-- Rage / HvH
+section(rage, "Auto Fire")
+Toggle(rage, "Auto Fire (shoots what it sees)", "AutoFire")
+Toggle(rage, "Silent Aim (flick on shot)", "SilentAim")
+Slider(rage, "Fire Delay", "AutoFireDelay", 0.03, 0.6, 3)
+hint(rage, "Auto-fires the equipped weapon (Tool:Activate) at the nearest target in FOV. Set FOV/Target Part in the Combat tab. Client-hit games (like this one) register the head shot.")
+section(rage, "Anti-Aim")
+Toggle(rage, "Anti-Aim", "AntiAimOn", function(on) setAntiAim(on) end)
+Dropdown(rage, "Mode", "AntiAimMode", { "Spin", "Backwards", "Jitter", "Left", "Right" })
+Slider(rage, "Spin Speed", "AntiAimSpeed", 2, 60, 0)
+hint(rage, "Rotates your character so enemy aimbots mis-track. Fights the game's own rotation — may look jittery and can affect movement. Game-dependent.")
+section(rage, "Camera")
+Toggle(rage, "Third Person", "ThirdPerson", function(on) setThirdPerson(on) end)
+Slider(rage, "3rd Person Zoom", "ThirdPersonZoom", 5, 30, 0)
 
 -- Weapon
 section(weapon, "Best-effort (game-dependent)")
@@ -1047,6 +1146,7 @@ function ERA_UNLOAD()
     if espConn then espConn:Disconnect() end
     pcall(function() espFolder:Destroy() end)
     setNoClip(false); setHitbox(false); setInfAmmo(false); Config.FastFireOn = false; antiKickActive = false
+    Config.AutoFire = false; setAntiAim(false); setThirdPerson(false)
     if moveConn then moveConn:Disconnect() end
     if wmFrameConn then wmFrameConn:Disconnect() end
     clearAllEsp()
@@ -1085,4 +1185,5 @@ if not loadedConfig then
 end
 
 Notify("ERA v9 🦀 loaded — tap the watermark (top-left) or press " .. (typeof(Config.MenuKey) == "EnumItem" and Config.MenuKey.Name or "MenuKey"), 4, Config.Accent)
+if Config.AutoFire then Notify("🔥 Auto Fire is ON (Rage tab) — it aims & shoots enemies in FOV", 5, Theme.Bad) end
 print("[ERA] v9 Claude edition loaded 🦀")

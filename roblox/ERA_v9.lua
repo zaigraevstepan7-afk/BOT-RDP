@@ -53,6 +53,7 @@ local Config = {
     -- Interface  (Claude 🦀 style)
     Accent = Color3.fromRGB(217, 119, 87), MenuKey = Enum.KeyCode.RightControl,
     UIScale = 1, UISounds = true, MenuBlur = true, WatermarkAnim = true,
+    ShowAimBtn = true, ShowNoClipBtn = true,
     ConfigName = "default",
 }
 
@@ -483,6 +484,9 @@ end
 -- ---- ESP (Highlight + Drawing box/name/dist/health/tracer) ----
 local hasDrawing = Drawing ~= nil
 local esp = {}   -- player -> { hl, box, name, dist, hpbg, hp, tracer }
+-- Highlights must live in a normal container (CoreGui), NOT inside a ScreenGui,
+-- or they silently fail to render. Parent a Folder next to our gui.
+local espFolder = new("Folder", { Name = "ERA_ESP" }, gui.Parent or gui)
 local function newDraw(t, props)
     if not hasDrawing then return nil end
     local ok, d = pcall(function() return Drawing.new(t) end)
@@ -493,8 +497,9 @@ end
 local function makeEsp(p)
     if esp[p] then return esp[p] end
     local e = {}
-    e.hl = new("Highlight", { FillTransparency = 0.6, OutlineTransparency = 0.2,
-        FillColor = Config.ESPColor, OutlineColor = Color3.new(1,1,1) }, gui)
+    e.hl = new("Highlight", { FillTransparency = 0.55, OutlineTransparency = 0,
+        FillColor = Config.ESPColor, OutlineColor = Color3.new(1,1,1),
+        DepthMode = Enum.HighlightDepthMode.AlwaysOnTop }, espFolder)
     e.box    = newDraw("Square", { Thickness = 1, Filled = false, Color = Config.ESPColor })
     e.name   = newDraw("Text",   { Size = 13, Center = true, Outline = true, Color = Color3.new(1,1,1) })
     e.dist   = newDraw("Text",   { Size = 12, Center = true, Outline = true, Color = Color3.fromRGB(220,220,220) })
@@ -853,6 +858,7 @@ local function loadConfig(name)
     else Notify("Load failed", 2, Theme.Bad) end
 end
 
+local aimBtn, ncBtn   -- mobile buttons (created later; forward-declared so Settings toggles can hide them)
 -- ============================ BUILD TABS =======================
 local combat = addTab("Combat",  "⌖")
 local weapon = addTab("Weapon",  "▤")
@@ -926,6 +932,10 @@ Keybind(setT, "Menu Key", "MenuKey", function(k) if typeof(k) == "EnumItem" and 
 Toggle(setT, "UI Sounds", "UISounds")
 Toggle(setT, "Background Blur", "MenuBlur", function(on) if not on then tween(menuBlur, { Size = 0 }, 0.2) elseif window.Visible then tween(menuBlur, { Size = 14 }, 0.2) end end)
 Toggle(setT, "Watermark Animation", "WatermarkAnim")
+section(setT, "Mobile Buttons")
+Toggle(setT, "Show AIM Button", "ShowAimBtn", function(on) if aimBtn then aimBtn.Visible = on end end)
+Toggle(setT, "Show NOCLIP Button", "ShowNoClipBtn", function(on) if ncBtn then ncBtn.Visible = on end end)
+hint(setT, "Menu opens by tapping the watermark (top-left).")
 local accents = { { "Claude 🦀", Color3.fromRGB(217,119,87) }, { "Blue", Color3.fromRGB(0,170,255) },
     { "Purple", Color3.fromRGB(150,90,255) }, { "Pink", Color3.fromRGB(255,45,120) }, { "Green", Color3.fromRGB(46,204,113) } }
 local accRow = row(setT, 44)
@@ -973,13 +983,7 @@ task.spawn(function()
     end
 end)
 
--- ============================ FLOATING BUTTON ==================
-local fab = new("TextButton", { Name = "FAB", Size = UDim2.new(0, 50, 0, 50), Position = UDim2.new(0, 20, 0.5, -25),
-    Text = "", AutoButtonColor = false, BackgroundColor3 = Config.Accent }, gui)
-corner(fab, 25); stroke(fab, Theme.Stroke, 1, 0.72); accent(fab, "BackgroundColor3")
-new("TextLabel", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "🦀",
-    Font = Enum.Font.GothamBold, TextSize = 22 }, fab)
-makeDraggable(fab)
+-- (No floating button — the menu opens by tapping the watermark, wired below.)
 
 -- ============================ MOBILE CONTROLS ==================
 -- AIM (hold to aim) + NOCLIP (tap to toggle).
@@ -1033,8 +1037,10 @@ local function bindMobile(btn, opts)
         end
     end)
 end
-local aimBtn = mobButton("AIM", UDim2.new(1, -66, 1, -66), Config.Accent)
-local ncBtn  = mobButton("NOCLIP", UDim2.new(1, -136, 1, -66), Theme.Bg2)
+aimBtn = mobButton("AIM", UDim2.new(1, -66, 1, -66), Config.Accent)
+ncBtn  = mobButton("NOCLIP", UDim2.new(1, -136, 1, -66), Theme.Bg2)
+aimBtn.Visible = Config.ShowAimBtn
+ncBtn.Visible  = Config.ShowNoClipBtn
 bindMobile(aimBtn, { base = Config.Accent, onHold = function() aimMobile = true end, onRelease = function() aimMobile = false end })
 bindMobile(ncBtn,  { base = Theme.Bg2, onTap = function() local w = widgets.NoClipOn; if w then w.set(not Config.NoClipOn) end end })
 
@@ -1058,8 +1064,27 @@ local function setMenu(o)
         t.Completed:Connect(function() if not menuOpen then window.Visible = false; uiScale.Scale = Config.UIScale end end)
     end
 end
-fab.MouseButton1Click:Connect(function() setMenu(not menuOpen) end)
 closeBtn.MouseButton1Click:Connect(function() setMenu(false) end)
+-- Open the menu by TAPPING the watermark (tap vs drag disambiguated).
+do
+    local downP, moved
+    wm.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            downP, moved = i.Position, false
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if downP and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            if (i.Position - downP).Magnitude > 6 then moved = true end
+        end
+    end)
+    wm.InputEnded:Connect(function(i)
+        if (i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch) and downP then
+            if not moved then setMenu(not menuOpen) end
+            downP = nil
+        end
+    end)
+end
 UIS.InputBegan:Connect(function(i, gp)
     if gp then return end
     if i.KeyCode == Config.MenuKey then setMenu(not menuOpen) end
@@ -1074,6 +1099,7 @@ function ERA_UNLOAD()
     pcall(function() RunService:UnbindFromRenderStep("ERA_Aim") end)
     Config.ESPOn = false
     if espConn then espConn:Disconnect() end
+    pcall(function() espFolder:Destroy() end)
     setNoClip(false); setHitbox(false); setInfAmmo(false); Config.FastFireOn = false; antiKickActive = false
     if moveConn then moveConn:Disconnect() end
     if wmFrameConn then wmFrameConn:Disconnect() end
@@ -1112,5 +1138,5 @@ if not loadedConfig then
     uiScaleSlider.set(math.clamp(math.min(vp.X / 660, vp.Y / 480), 0.7, 1))
 end
 
-Notify("ERA v9 🦀 loaded — tap 🦀 or press " .. (typeof(Config.MenuKey) == "EnumItem" and Config.MenuKey.Name or "MenuKey"), 3.5, Config.Accent)
+Notify("ERA v9 🦀 loaded — tap the watermark (top-left) or press " .. (typeof(Config.MenuKey) == "EnumItem" and Config.MenuKey.Name or "MenuKey"), 4, Config.Accent)
 print("[ERA] v9 Claude edition loaded 🦀")

@@ -620,17 +620,32 @@ end
 -- Tap a recorded on-screen coordinate (the game's own fire button) via simulated input.
 -- Plain input automation — no hooks, no remotes — so the game fires exactly as if you
 -- tapped the button with your finger.
+local tapBusy = false
 local function tapAt(x, y)
     if not VIM or not x or not y or (x == 0 and y == 0) then return false end
-    local touched = pcall(function()
-        VIM:SendTouchEvent(1, x, y, false)
-        VIM:SendTouchEvent(1, x, y, true)
+    if tapBusy then return false end   -- one clean tap at a time (no overlapping press/release)
+    tapBusy = true
+    task.spawn(function()             -- off the render step so we can wait a frame between down & up
+        local ok = pcall(function()
+            if isTouch() then
+                VIM:SendTouchEvent(999, x, y, false)  -- touch began (id 999 = won't clash with your real fingers)
+                task.wait()                           -- a real tap needs a frame between press & release
+                VIM:SendTouchEvent(999, x, y, true)   -- touch ended
+            else
+                VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                task.wait()
+                VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            end
+        end)
+        if not ok then                 -- fall back to the other input kind
+            pcall(function()
+                VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            end)
+        end
+        tapBusy = false
     end)
-    if touched then return true end
-    return (pcall(function()
-        VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
-        VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
-    end))
+    return true
 end
 local function fireWeapon()
     local m = Config.FireMethod or "Click"
@@ -1178,7 +1193,8 @@ corner(wmBar, 2)
 local wmTxt = new("TextLabel", { Size = UDim2.new(1, -26, 1, 0), Position = UDim2.new(0, 18, 0, 0), BackgroundTransparency = 1,
     Text = "ERA", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Theme.Text,
     Font = Enum.Font.GothamMedium, TextSize = 12 }, wm)
-makeDraggable(wm)
+-- (drag handled in the watermark tap/drag block below, with a threshold so a tap
+--  to open the menu never nudges it — that drift is what made it wander off-screen)
 -- On-screen aim debug (shows whether the bot sees enemies / picks a target)
 aimDbg = new("TextLabel", { Name = "AimDbg", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 6),
     Size = UDim2.new(0, 380, 0, 22), BackgroundColor3 = Theme.Bg2, BackgroundTransparency = 0.2,
@@ -1289,20 +1305,24 @@ end
 closeBtn.MouseButton1Click:Connect(function() setMenu(false) end)
 -- Open the menu by TAPPING the watermark (tap vs drag disambiguated).
 do
-    local downP, moved
+    local downP, startPos, moved, active
     wm.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            downP, moved = i.Position, false
+            downP, startPos, moved, active = i.Position, wm.Position, false, true
         end
     end)
     UIS.InputChanged:Connect(function(i)
-        if downP and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-            if (i.Position - downP).Magnitude > 6 then moved = true end
+        if not active or not downP then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+            local d = i.Position - downP
+            if d.Magnitude > 6 then moved = true end   -- dead-zone: a tap never moves it
+            if moved then wm.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y) end
         end
     end)
     wm.InputEnded:Connect(function(i)
-        if (i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch) and downP then
-            if not moved then setMenu(not menuOpen) end
+        if (i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch) and active then
+            active = false
+            if not moved then setMenu(not menuOpen) end   -- clean tap = open/close
             downP = nil
         end
     end)

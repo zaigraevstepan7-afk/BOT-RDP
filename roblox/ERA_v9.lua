@@ -46,7 +46,8 @@ local Config = {
     InfAmmoOn = false, FastFireOn = false, FireDelay = 0.03,
     -- HvH / Rage  (Auto Fire = rage aimbot+fire, OFF by default so nothing hijacks
     -- your aim on load; Trigger Bot below is the fire-only option that never aims.)
-    AutoFire = false, AutoFireDelay = 0.08, SilentAim = true,
+    AutoFire = false, AutoFireDelay = 0.08, SilentAim = true, AutoFireWallCheck = true,
+    FireMethod = "Click",   -- Click = synthetic input (safe); Activate = Tool:Activate() (Adonis-type ACs flag it); Auto = both
     TriggerBotOn = false, TriggerBotFOV = 26, TriggerBotDelay = 0.05, TriggerBotVisible = true,
     AntiAimOn = false, AntiAimMode = "Spin", AntiAimSpeed = 20,
     AntiAimPitchMode = "Off", AntiAimPitch = 0,
@@ -591,25 +592,55 @@ local fovCircle = newDraw("Circle", { Thickness = 1.6, NumSides = 64, Filled = f
 local rainbowHue = 0
 -- Auto Fire: shoots the equipped Tool via Tool:Activate() (works on PC AND mobile) once the
 -- crosshair is on the target. Silent Aim flicks the camera onto the head for the shot frame.
--- fire the equipped weapon (works PC + mobile). Tool:Activate() is the cross-platform path;
--- mouse1click is a fallback for click-driven guns on executors that expose it.
-local function fireWeapon()
+-- Firing. Tool:Activate() is a NAMECALL that anti-cheats (e.g. Adonis "namecallInstance")
+-- flag as a programmatic action and KICK for. So we prefer SYNTHETIC INPUT (executor click /
+-- VirtualInputManager), which the engine delivers like a real tap — the game's own gun code
+-- then fires legitimately, so there's no suspicious namecall to detect.
+local VIM; pcall(function() VIM = game:GetService("VirtualInputManager") end)
+local function clickInput()
+    if mouse1click then local ok = pcall(mouse1click); return ok end
+    if mouse1press and mouse1release then pcall(mouse1press); pcall(mouse1release); return true end
+    if VIM then
+        local ok = pcall(function()
+            local vp = cam().ViewportSize
+            VIM:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, true, game, 0)
+            VIM:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, false, game, 0)
+        end)
+        return ok
+    end
+    return false
+end
+local function activateTool()   -- namecall path — may be detected; only used if the user picks it
     local char = LocalPlayer.Character
     local tool = char and char:FindFirstChildOfClass("Tool")
-    if tool then pcall(function() tool:Activate() end); return true end
-    if mouse1click then pcall(function() mouse1click() end); return true end
+    if tool then local ok = pcall(function() tool:Activate() end); return ok end
     return false
+end
+local function fireWeapon()
+    local m = Config.FireMethod or "Click"
+    if m == "Click" then return clickInput()
+    elseif m == "Activate" then return activateTool() or clickInput()
+    else return clickInput() or activateTool() end   -- Auto: click first, namecall as fallback
+end
+-- Always-on line-of-sight check (independent of the aimbot's Visible Check toggle).
+local function losClear(part)
+    local from = cam().CFrame.Position
+    local dir = part.Position - from
+    local rp = RaycastParams.new(); rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { LocalPlayer.Character }
+    local hit = Workspace:Raycast(from, dir, rp)
+    if not hit then return true end
+    if part.Parent and hit.Instance:IsDescendantOf(part.Parent) then return true end
+    return hit.Distance >= dir.Magnitude - 6
 end
 local lastFire = 0
 local function tryAutoFire(part, C)
-    local sp, on = C:WorldToViewportPoint(part.Position)
-    if not on then return end
-    local centered = (Vector2.new(sp.X, sp.Y) - Vector2.new(C.ViewportSize.X / 2, C.ViewportSize.Y / 2)).Magnitude
-    if not Config.SilentAim and centered > 45 then return end   -- wait for the lock unless silent flick
+    -- Spec: the aim is already locked onto this target; fire when it's not behind a wall.
+    if Config.AutoFireWallCheck and not losClear(part) then return end
     local now = os.clock()
     if now - lastFire < math.max(0.03, Config.AutoFireDelay) then return end
     lastFire = now
-    if Config.SilentAim then C.CFrame = CFrame.new(C.CFrame.Position, aimAt(part)) end  -- flick onto the head
+    if Config.SilentAim then C.CFrame = CFrame.new(C.CFrame.Position, aimAt(part)) end  -- snap onto the head for the shot
     fireWeapon()
 end
 -- Trigger Bot: fires the instant your crosshair is on an enemy — no aim movement at all.
@@ -682,16 +713,18 @@ RunService:BindToRenderStep("ERA_Aim", Enum.RenderPriority.Camera.Value + 1, fun
     if not engage then lockedTarget = nil; return end
     local part = pickTarget(); if not part then return end
     local goal = aimAt(part)
-    -- Silent moves the raw mouse (mousemoverel), which only exists / works with a real mouse.
-    -- On touch devices it did nothing — that's why Silent looked broken on mobile. Fall back to
-    -- the camera path on touch or when mousemoverel is missing, so Silent always actually aims.
-    if Config.AimMethod == "Camera" or isTouch() or not mousemoverel then
-        local a = 1 - (1 - math.clamp(Config.Smoothness, 0.05, 1)) ^ (dt * 60)   -- frame-rate independent lerp
-        C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), a)
-        pcall(function() C.Focus = CFrame.new(goal) end)   -- some first-person games follow Camera.Focus
-    else
+    -- Aim delivery. Silent = FAST: raw mouse on real-mouse setups, otherwise an INSTANT camera
+    -- snap (that's the "faster" you asked for). Camera = smooth via the Smoothness slider.
+    if Config.AimMethod == "Silent" and mousemoverel and not isTouch() then
         local sp, on = C:WorldToViewportPoint(goal)
         if on then mousemoverel((sp.X - C.ViewportSize.X / 2) * Config.Smoothness, (sp.Y - C.ViewportSize.Y / 2) * Config.Smoothness) end
+    elseif Config.AimMethod == "Silent" then
+        C.CFrame = CFrame.new(C.CFrame.Position, goal)   -- instant snap onto the target
+        pcall(function() C.Focus = CFrame.new(goal) end)
+    else
+        local a = 1 - (1 - math.clamp(Config.Smoothness, 0.05, 1)) ^ (dt * 60)   -- smooth Camera aim
+        C.CFrame = C.CFrame:Lerp(CFrame.new(C.CFrame.Position, goal), a)
+        pcall(function() C.Focus = CFrame.new(goal) end)
     end
     if Config.AutoFire then tryAutoFire(part, C) end
 end)
@@ -999,9 +1032,11 @@ Dropdown(combat, "Hitbox Part", "HitboxPart", { "HumanoidRootPart", "Head", "Tor
 -- Rage / HvH
 section(rage, "Auto Fire (rage — moves your aim)")
 Toggle(rage, "Auto Fire (aims + shoots)", "AutoFire")
-Toggle(rage, "Silent Aim (flick on shot)", "SilentAim")
+Toggle(rage, "Silent Aim (snap on shot)", "SilentAim")
+Toggle(rage, "Wall Check (skip if behind wall)", "AutoFireWallCheck")
 Slider(rage, "Fire Delay", "AutoFireDelay", 0.03, 0.6, 3)
-hint(rage, "RAGE: locks the camera onto the nearest enemy in FOV and fires. This one DOES move your aim. For fire-only with no aim movement, use the Trigger Bot below instead.")
+Dropdown(rage, "Fire Method", "FireMethod", { "Click", "Activate", "Auto" })
+hint(rage, "RAGE: locks onto the nearest VISIBLE enemy in FOV and fires. Fire Method (used by Auto Fire AND Trigger Bot): Click = synthetic input, safest — no kick; Activate = Tool:Activate(), which Adonis flags as 'namecallInstance' → kick; Auto = Click then Activate. If Click doesn't fire your gun, try Auto.")
 section(rage, "Trigger Bot (fire only — no aim)")
 Toggle(rage, "Trigger Bot", "TriggerBotOn")
 Slider(rage, "Trigger FOV (px)", "TriggerBotFOV", 4, 120, 0)
@@ -1048,7 +1083,7 @@ Slider(moveT, "JumpPower value", "JumpPower", 50, 300, 0)
 -- Utility
 section(utilT, "Protection")
 Toggle(utilT, "Anti-Kick", "AntiKickOn", function(on) setAntiKick(on) end)
-hint(utilT, "Best-effort: blocks client Kick namecalls. Needs an executor with hookmetamethod; server bans are not affected.")
+hint(utilT, "Best-effort: blocks client Kick namecalls. Needs hookmetamethod. WARNING: hooking __namecall can itself be DETECTED by anti-cheats like Adonis — if you get kicked, leave this OFF. Server-side bans are not affected either way.")
 
 -- Settings
 section(setT, "Interface")
